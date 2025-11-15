@@ -110,6 +110,14 @@ class DatasetCleaner():
         return validated_clips
     
     def _copy_validated_files(self, validated_clips: pd.DataFrame):
+        """Copies validated audio files to output directory and saves metadata
+        
+        Args:
+            validated_clips (pd.DataFrame): DataFrame containing validated clips with 'path' column
+        
+        Returns:
+            None
+        """
         
         _logger.info(f"\nCopying files to {self.output_dir}...")
         

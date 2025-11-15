@@ -209,3 +209,4 @@ __marimo__/
 # Specifics for this project
 data/
 .DS_Store
+logs/

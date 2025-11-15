@@ -1,4 +1,5 @@
-# Generating MEL spectogram using torchaudio
+"""Generating MEL spectogram using torchaudio"""
+
 # torch imports
 import torch
 import torchaudio

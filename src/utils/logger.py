@@ -44,7 +44,7 @@ def get_logger(
     Path(log_dir).mkdir(parents=True, exist_ok=True)
 
     # Timestamped log file
-    log_file = os.path.join(log_dir, f"{datetime.now():%Y-%m-%d}.log")
+    log_file = os.path.join(log_dir, f"{datetime.now():%Y%m%d%H%M%S}.log")
 
     # Formatters
     formatter = colorlog.ColoredFormatter(

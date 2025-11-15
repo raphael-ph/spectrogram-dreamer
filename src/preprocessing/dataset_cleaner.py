@@ -7,7 +7,7 @@ import shutil
 from tqdm import tqdm
 
 # internal imports
-from utils.logger import get_logger
+from ..utils.logger import get_logger
 
 # data wrangling
 import pandas as pd

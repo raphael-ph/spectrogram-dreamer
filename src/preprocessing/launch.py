@@ -1,8 +1,8 @@
 """This file is used to run the complete pipeline with a single command"""
 
-from pipeline import Pipeline
+from .pipeline import Pipeline
 
-if __name__ == "__main__":
+def launch():
     # Example usage (adjust paths as needed)
     p = Pipeline(input_dir="data/1_validated-audio/",
                  output_dir="data/2_mel-spectrograms/",

@@ -43,6 +43,30 @@ class DatasetCleaner():
             self.output_dir = Path(output_dir)
         
         self.output_dir.mkdir(parents=True, exist_ok=True)
+    
+# --- Main funtion of the cleaner ---
+# Applies all necessary changes and saves the validated files to a new dir
+
+    def run(self,):
+        """Apply all necessary changes to the dataset"""
+        _logger.info("Starting dataset cleaning pipeline...")
+        
+        # Load metadata
+        _logger.info("Loading metadata file...")
+        df = self._load_dataframe()
+        
+        # Filter validated clips
+        _logger.info("Filtering validated clips...")
+        validated_clips = self._filter_data(df)
+        
+        # Copy files
+        _logger.info("Copying validated audio files...")
+        self._copy_validated_files(validated_clips)
+        
+        _logger.info("Dataset cleaning pipeline completed!")
+
+# --- Helper functions ---
+# Necessary functions for cleaning
         
     def _load_dataframe(self) -> pd.DataFrame:
         """Loads the dataframe based on metadatafile

@@ -1,8 +1,10 @@
 """Applies the complete preprocessing pipeline to generate our dataset for training the model.
 
-This pipeline uses `DatasetCleaner` to prepare validated audio (if desired) and
+This pipeline uses `DatasetCleaner` to prepare validated audio (if needed) and
 `generate_spectrogram.AudioFile` to compute mel-spectrograms, segment them,
 save each segment as `.npy` and compute global normalization statistics.
+
+This implementation takes inspiration from Henrique's notebook for processing the audio spectrograms.
 """
 # standard
 import os
@@ -27,7 +29,7 @@ class Pipeline:
                  input_dir: str,
                  output_dir: str,
                  file_extension: str = "mp3",
-                 # spectrogram params (defaults align with existing notebook)
+                 # spectrogram params (defaults align with Henrique's notebook)
                  n_fft: int = 512,
                  win_length: Optional[int] = 20,
                  hop_length: Optional[int] = 10,
@@ -89,7 +91,8 @@ class Pipeline:
                                   segment_duration=self.segment_duration,
                                   overlap=self.overlap)
 
-                mel = audio.mel_spectrogram  # torch tensor
+                mel = audio.mel_spectrogram  # torch tensor 
+                _logger.debug(f"mel shape: {mel.shape}")
 
                 # Keep tensors: move to CPU and detach
                 mel = mel.detach().cpu()
@@ -144,27 +147,5 @@ class Pipeline:
             _logger.info(f"Normalization saved to {stats_path}")
         else:
             _logger.warning("No statistics generated (no valid mels).")
-
-
-if __name__ == "__main__":
-    # Example usage (adjust paths as needed)
-    p = Pipeline(input_dir="data/1_validated-audio/",
-                 output_dir="data/2_mel-spectrograms/",
-                 file_extension="mp3",
-                 n_fft=512,
-                 win_length=20,
-                 hop_length=10,
-                 n_mels=64,
-                 f_min=50,
-                 f_max=7600,
-                 segment_duration=0.1,
-                 overlap=0.5)
-
-    # If you need to run the dataset cleaner first, uncomment and set paths:
-    # p.run_dataset_cleaner(metadata_file='data/common-voice-dataset-version-4/data-file/validated.tsv',
-    #                       clips_dir='data/common-voice-dataset-version-4/new-clip/',
-    #                       min_votes=2)
-
-    p.process()
 
     

@@ -57,6 +57,7 @@ class AudioFile:
         # Ensure n_fft is at least as large as win_length. STFT requires win_length <= n_fft.
         if self.n_fft < self.win_length:
             # Choose the next power of two >= win_length for performance and correctness
+            # found this trick here: https://stackoverflow.com/questions/28857930/bitwise-operations-to-produce-power-of-two-in-python
             new_n_fft = 1 << (self.win_length - 1).bit_length()
             _logger.info(f"Adjusting n_fft from {self.n_fft} -> {new_n_fft} to satisfy win_length <= n_fft")
             self.n_fft = new_n_fft

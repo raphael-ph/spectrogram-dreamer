@@ -7,7 +7,7 @@ def launch():
     p = Pipeline(input_dir="data/1_validated-audio/",
                  output_dir="data/2_mel-spectrograms/",
                  file_extension="mp3",
-                 n_fft=512,
+                 n_fft=1024,
                  win_length=20,
                  hop_length=10,
                  n_mels=64,
@@ -17,8 +17,8 @@ def launch():
                  overlap=0.5)
 
     # If you need to run the dataset cleaner first, uncomment and set paths:
-    p.run_dataset_cleaner(metadata_file='data/data-file/validated.tsv',
-                          clips_dir='data/new-clip/',
-                          min_votes=2)
+    # p.run_dataset_cleaner(metadata_file='data/data-file/validated.tsv',
+    #                       clips_dir='data/new-clip/',
+    #                       min_votes=2)
 
     p.process()

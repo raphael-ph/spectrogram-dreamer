@@ -118,14 +118,14 @@ class Pipeline:
                 all_means.append(mean_per_band)
                 all_stds.append(std_per_band)
 
-                # Segment using L and step from AudioFile and save each segment as .pt
-                L = audio.L
-                step = max(1, int(L * (1 - self.overlap))) if hasattr(audio, 'overlap') else audio.step
-                segments = []
-                for start in range(0, mel_2d.shape[1] - L + 1, step):
-                    segments.append(mel_2d[:, start:start + L])
+                # Segment using AudioFile's built-in segmentation method
+                # This delegates the time-axis segmentation to `AudioFile.segment_spectogram`
+                # (alias `segment_spectrogram` is also available).
+                segments = audio.segment_spectrogram()
                 if len(segments) == 0 and mel_2d.shape[1] > 0:
-                    segments.append(mel_2d[:, :min(mel_2d.shape[1], L)])
+                    # Fallback: keep first L frames, consistent with previous behavior
+                    L = audio.L
+                    segments = [mel_2d[:, :min(mel_2d.shape[1], L)]]
 
                 base = f.stem
                 audio_out_dir = self.output_dir / base

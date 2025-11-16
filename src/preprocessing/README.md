@@ -85,7 +85,7 @@ Segmentation Parameters:
   - Shape: `[channels, n_mels, time_frames]`
   - Uses Slaney normalization and HTK mel scale
 
-- `segment_spectrogram()`: Segments the mel-spectrogram based on `segment_duration` and `overlap`
+- `segment_spectrogram()`: Segments the mel-spectrogram based on `segment_duration` and `overlap`.
   - Returns: List of mel-spectrogram segments as tensors
 
 - `view_spectrogram(title, ylabel, ax, save_path)`: Visualizes the mel-spectrogram

@@ -95,16 +95,30 @@ class AudioFile:
             plt.savefig(path, bbox_inches="tight", pad_inches=0)
             _logger.info(f"Saved spectrogram: {path}")
         
-    def segment_spectogram(self) -> List:
+    def segment_spectrogram(self) -> List:
         """Segments spectograms to feed them to dreamer
         
         Returns: a list of segmented spectrograms
         """
 
+        # Compute a 2D mel spectrogram (n_mels x time)
+        mel = self.mel_spectrogram
+
+        # Support both shapes: [1, n_mels, time] and [n_mels, time]
+        if mel.dim() == 3 and mel.shape[0] == 1:
+            mel_2d = mel.squeeze(0)
+        elif mel.dim() == 2:
+            mel_2d = mel
+        else:
+            # Fallback: try to reshape conservatively to [n_mels, time]
+            mel_2d = mel.reshape(mel.shape[-2], mel.shape[-1])
+
         step = max(1, int(self.L * (1 - self.overlap)))
         segments = []
-        for start in range(0, self.mel_spectrogram.shape[1] - self.L + 1, step):
-            segments.append(self.mel_spectrogram[:, start:start + self.L])
+
+        # Loop over time axis
+        for start in range(0, mel_2d.shape[1] - self.L + 1, step):
+            segments.append(mel_2d[:, start:start + self.L])
         if len(segments) == 0 and self.mel_spectrogram.shape[1] > 0:
             segments.append(self.mel_spectrogram[:, :min(self.mel_spectrogram.shape[1], self.L)])
         return segments

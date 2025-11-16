@@ -87,258 +87,104 @@ Segmentation Parameters:
 
 - `segment_spectrogram()`: Segments the mel-spectrogram based on `segment_duration` and `overlap`.
   - Returns: List of mel-spectrogram segments as tensors
+# Preprocessing Module
 
-- `view_spectrogram(title, ylabel, ax, save_path)`: Visualizes the mel-spectrogram
-  - Converts to dB scale with 80dB dynamic range
-  - Normalizes to 0-1 range for consistency
-  - Optionally saves as high-resolution PNG image
+The preprocessing module prepares audio for the spectrogram-dreamer pipeline. It covers dataset validation, mel-spectrogram generation, sliding-window segmentation, and creation of per-file style vectors used by the model.
 
-**Internal Processing:**
+## Overview
 
-- Automatically adjusts `n_fft` to satisfy the STFT constraint: `n_fft >= win_length`
-- Converts time-based parameters (win_length, hop_length) from milliseconds to samples
-- Supports both mono and multi-channel audio (squeezes to 2D if needed)
+The module performs the following steps:
 
-**Example Usage:**
+- Validate and filter raw audio using crowdsourced metadata (optional)
+- Generate mel-spectrograms from validated audio
+- Segment spectrograms into fixed-length overlapping windows
+- Extract and save per-file style vectors (from metadata)
+- Compute and save global normalization statistics for training
+
+## Components
+
+### `dataset_cleaner.py` — DatasetCleaner
+
+Filters audio files using a TSV metadata file (crowd votes) and copies validated clips to a target directory.
+
+Key points:
+- Input: TSV metadata with vote counts
+- Output: Validated audio files and `validated_metadata.tsv` in the configured output directory
+- Typical use: run once to produce `data/1_validated-audio/`
+
+Example:
+
 ```python
-from generate_spectrogram import AudioFile
+from src.preprocessing.dataset_cleaner import DatasetCleaner
 
-audio = AudioFile(
-    'path/to/audio.mp3',
-    n_fft=512,
-    win_length=20,
-    hop_length=10,
-    n_mels=64,
-    f_min=50,
-    f_max=7600,
-    segment_duration=0.1,
-    overlap=0.5
-)
-
-# Get the mel-spectrogram
-mel = audio.mel_spectrogram
-print(mel.shape)  # torch.Size([1, 64, time_frames])
-
-# Segment it
-segments = audio.segment_spectrogram()
-
-# Visualize and save
-audio.view_spectrogram('My Audio', save_path='./images/audio')
-```
-
----
-
-### 3. `pipeline.py` - Pipeline
-
-Orchestrates the complete preprocessing workflow combining dataset cleaning and spectrogram generation.
-
-#### Class: `Pipeline`
-
-**Purpose:** Provides a high-level interface to run the entire preprocessing pipeline: validate datasets and generate segmented spectrograms with normalization statistics.
-
-**Constructor Parameters:**
-
-Directory & Format:
-- `input_dir` (str): Directory containing audio files to process
-- `output_dir` (str): Directory where processed spectrograms will be saved
-- `file_extension` (str, default="mp3"): Audio file extension to process
-
-Spectrogram Parameters (same as AudioFile):
-- `n_fft`, `win_length`, `hop_length`, `n_mels`, `f_min`, `f_max`
-- `segment_duration`, `overlap`
-
-**Key Methods:**
-
-- `run_dataset_cleaner(metadata_file, clips_dir, min_votes)`: Runs the dataset validation step
-  - Filters validated audio and copies to `input_dir`
-  - Parameters match `DatasetCleaner` constructor
-
-- `process()`: Processes all audio files in `input_dir`
-  - For each audio file:
-    - Generates mel-spectrogram
-    - Extracts overlapping segments
-    - Saves each segment as `<audio_name>_NNN.pt` (PyTorch tensor format)
-    - Computes per-band mean and std
-  - Saves global normalization statistics to `output_dir/mel_stats.pt`
-  - Output structure:
-    ```
-    output_dir/
-    ├── mel_stats.pt              # Global normalization stats
-    ├── audio1/
-    │   ├── audio1_000.pt
-    │   ├── audio1_001.pt
-    │   └── ...
-    └── audio2/
-        ├── audio2_000.pt
-        └── ...
-    ```
-
-**Example Usage:**
-```python
-from pipeline import Pipeline
-
-# Create pipeline instance
-p = Pipeline(
-    input_dir='data/1_validated-audio/',
-    output_dir='data/2_mel-spectrograms/',
-    file_extension='mp3',
-    n_fft=512,
-    win_length=20,
-    hop_length=10,
-    n_mels=64,
-    f_min=50,
-    f_max=7600,
-    segment_duration=0.1,
-    overlap=0.5
-)
-
-# Step 1: Validate and filter dataset (optional)
-p.run_dataset_cleaner(
-    metadata_file='data/data-file/validated.tsv',
-    clips_dir='data/new-clip/',
+cleaner = DatasetCleaner(
+    metadata_file_path='data/data-file/validated.tsv',
+    clips_dir_path='data/new-clip/',
+    output_dir='data/1_validated-audio/',
     min_votes=2
 )
-
-# Step 2: Process all audio files
-p.process()
+cleaner.run()
 ```
 
----
+### `generate_spectrogram.py` — AudioFile
 
-### 4. `launch.py` - Quick Start Script
+Loads audio, computes mel-spectrograms, supports segmentation, visualization, and style-vector extraction.
 
-A ready-to-use script for running the complete pipeline with a single command.
+Important behaviors:
+- Supports `.mp3` and `.wav` inputs
+- Uses Slaney normalization and HTK mel scale for consistency
+- Converts time-based `win_length`/`hop_length` (ms) to samples internally
+- Exposes `.mel_spectrogram` (PyTorch tensor) and `segment_spectrogram()`
 
-**Configuration:**
-The script is pre-configured with sensible defaults aligned with Henrique's notebook. Modify the parameters in the `__main__` block to customize:
+Common parameters (constructor):
+- `waveform_path` (str)
+- `n_fft` (int)
+- `win_length` (ms)
+- `hop_length` (ms)
+- `n_mels` (int)
+- `f_min`, `f_max` (Hz)
+- `segment_duration` (s)
+- `overlap` (0.0–1.0)
+
+Example:
 
 ```python
-p = Pipeline(
-    input_dir="data/1_validated-audio/",
-    output_dir="data/2_mel-spectrograms/",
-    file_extension="mp3",
-    n_fft=512,
-    win_length=20,
-    hop_length=10,
-    n_mels=64,
-    f_min=50,
-    f_max=7600,
-    segment_duration=0.1,
-    overlap=0.5
-)
+from src.preprocessing.generate_spectrogram import AudioFile
+
+audio = AudioFile('path/to/audio.mp3', n_fft=512, win_length=20, hop_length=10)
+mel = audio.mel_spectrogram
+segments = audio.segment_spectrogram()
 ```
 
-**Running:**
-```bash
-python src/preprocessing/launch.py
-```
+### `pipeline.py` — Pipeline
 
----
+High-level orchestrator that ties dataset cleaning, mel generation, segmentation, style extraction, and stats computation.
 
-## Data Flow
+Constructor highlights:
+- `input_dir` (str): Directory with validated audio files
+- `output_dir` (str): Where to save segmented mel files and `mel_stats.pt`
+- `style_vector_dir` (str): Directory where per-file style vectors are written
+- `file_extension` (default: `mp3`)
+- Spectrogram params: `n_fft`, `win_length`, `hop_length`, `n_mels`, `f_min`, `f_max`
+- Segmentation params: `segment_duration`, `overlap`
 
-```
-Raw Audio Files
-       ↓
-[dataset_cleaner.py]
-       ↓
-Validated Audio Files
-       ↓
-[generate_spectrogram.py]
-       ↓
-Mel-Spectrograms
-       ↓
-[Pipeline.process()]
-       ↓
-Segmented Spectrograms + Normalization Stats
-```
+Notes about usage:
+- `run_dataset_cleaner(metadata_file, clips_dir, min_votes)` will run `DatasetCleaner` and copy validated audio into `input_dir`.
+- `process(metadata_file)` requires a metadata TSV to build the global style map (used to extract per-file style vectors). The method will:
+  - load global styles from `AudioFile.load_global_styles(metadata_file)`
+  - iterate over audio files in `input_dir`
+  - compute and save overlapping mel segments to `output_dir/<audio_name>/<audio_name>_XXXX.pt`
+  - save normalization stats to `output_dir/mel_stats.pt`
 
-## Output Files
-
-### Segmented Spectrograms
-- **Format:** PyTorch tensor (.pt) files
-- **Location:** `output_dir/<audio_name>/<audio_name>_NNN.pt`
-- **Shape:** `[n_mels, time_frames]` (2D tensor)
-- **NNN:** Zero-padded segment index (000, 001, etc.)
-
-### Normalization Statistics
-- **File:** `output_dir/mel_stats.pt`
-- **Contents:** Dictionary with keys:
-  - `"mean"`: Per-band global mean (shape: `[n_mels]`)
-  - `"std"`: Per-band global std (shape: `[n_mels]`)
-- **Usage:** For normalizing input data during model training
-
-### Validation Metadata (from DatasetCleaner)
-- **File:** `output_dir/validated_metadata.tsv`
-- **Contents:** Filtered metadata for validated clips
-
----
-
-## Key Parameters Explained
-
-### Spectrogram Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `n_fft` | 512 | FFT size; determines frequency resolution |
-| `win_length` | 20 ms | Window size for STFT; larger = better frequency resolution but slower |
-| `hop_length` | 10 ms | Frame advancement; smaller = more temporal resolution (100 fps at 10ms) |
-| `n_mels` | 64 | Number of mel frequency bins; more bins = more spectral detail |
-| `f_min` | 50 Hz | Minimum frequency to capture (filters out very low frequencies) |
-| `f_max` | 7600 Hz | Maximum frequency to capture (typical for speech/music) |
-
-### Segmentation Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `segment_duration` | 0.1 s | Length of each segment (100ms = ~10 frames at 100fps) |
-| `overlap` | 0.5 | Overlap ratio between segments; 0.5 = 50% overlap |
-
----
-
-## Dependencies
-
-- `torch`: PyTorch for tensor operations
-- `torchaudio`: Audio loading and mel-spectrogram computation
-- `pandas`: Data manipulation for metadata
-- `numpy`: Numerical operations
-- `tqdm`: Progress bars
-- `matplotlib`: Visualization (for `view_spectrogram()`)
-
----
-
-## Error Handling
-
-The pipeline includes robust error handling:
-
-- **Invalid file formats:** Only `.mp3` and `.wav` are accepted
-- **Missing files:** Gracefully skips files that don't exist or can't be loaded
-- **Empty spectrograms:** Skips audio files that produce empty spectrograms
-- **Path creation:** Automatically creates output directories if they don't exist
-- **Logging:** All operations logged to help debug issues
-
----
-
-## Logging
-
-The module uses a custom logger accessible via `from utils.logger import get_logger`. Log output includes:
-
-- Dataset statistics (completion %, validation %, file counts)
-- Processing progress (file-by-file status with error messages)
-- Parameter adjustments (e.g., when `n_fft` is auto-adjusted)
-- File I/O operations (save paths, file counts)
-
----
-
-## Example Complete Workflow
+Example:
 
 ```python
 from src.preprocessing.pipeline import Pipeline
 
-# Initialize pipeline with custom parameters
-pipeline = Pipeline(
+p = Pipeline(
     input_dir='data/1_validated-audio/',
     output_dir='data/2_mel-spectrograms/',
+    style_vector_dir='data/3_style-vectors/',
     file_extension='mp3',
     n_fft=512,
     win_length=20,
@@ -350,25 +196,91 @@ pipeline = Pipeline(
     overlap=0.5
 )
 
-# Step 1: Clean dataset (if raw data needs validation)
-pipeline.run_dataset_cleaner(
-    metadata_file='data/data-file/validated.tsv',
-    clips_dir='data/new-clip/',
-    min_votes=2
-)
+# Optional: validate raw clips first
+p.run_dataset_cleaner(metadata_file='data/data-file/validated.tsv', clips_dir='data/new-clip/', min_votes=2)
 
-# Step 2: Generate spectrograms and segments
-pipeline.process()
-
-# Now spectrograms are ready for model training!
+# Process validated audio. `metadata_file` is required for style extraction.
+p.process(metadata_file='data/data-file/validated.tsv')
 ```
 
----
+### `launch.py` — Launcher helper
+
+`src/preprocessing/launch.py` provides a convenience example that instantiates `Pipeline` with sensible defaults and calls `p.process(...)`. The file defines a `launch()` function — calling it will execute the example pipeline.
+
+To run the example launcher from a Python REPL or script:
+
+```py
+from src.preprocessing.launch import launch
+launch()
+```
+
+Or run on the command line using Python's `-c` flag:
+
+```bash
+python -c "from src.preprocessing.launch import launch; launch()"
+```
+
+Note: the example in `launch.py` sets `n_fft=1024` while `Pipeline` defaults to `512`. Adjust parameters as needed.
+
+## Data flow
+
+Raw audio → dataset cleaning (optional) → validated audio → mel generation → segmentation → style vectors + normalization stats
+
+## Output
+
+- Segmented spectrograms: `output_dir/<audio_name>/<audio_name>_0000.pt` (2D tensor: `[n_mels, time_frames]`)
+- Style vectors: saved into the `style_vector_dir` provided to `Pipeline`
+- Normalization stats: `output_dir/mel_stats.pt` (dict with `mean` and `std`, per-mel-band)
+- Validation metadata: `validated_metadata.tsv` (from `DatasetCleaner`)
+
+## Key parameters
+
+- `n_fft` (default in `Pipeline`): 512 — FFT size for STFT
+- `win_length` / `hop_length`: provided in ms, converted internally to samples
+- `n_mels`: number of mel bins (default 64)
+- `segment_duration`: seconds per segment (default 0.1)
+- `overlap`: overlap ratio (default 0.5)
+
+## Running the pipeline (quick steps)
+
+1. (Optional) Validate raw clips:
+
+```bash
+python -c "from src.preprocessing.dataset_cleaner import DatasetCleaner; DatasetCleaner('data/data-file/validated.tsv','data/new-clip/','data/1_validated-audio/').run()"
+```
+
+2. Run processing (from Python):
+
+```bash
+python -c "from src.preprocessing.pipeline import Pipeline; p=Pipeline('data/1_validated-audio/','data/2_mel-spectrograms/','data/3_style-vectors/'); p.process('data/data-file/validated.tsv')"
+```
+
+3. Or call the launcher helper:
+
+```bash
+python -c "from src.preprocessing.launch import launch; launch()"
+```
+
+## Dependencies
+
+- `torch`
+- `torchaudio`
+- `pandas`
+- `numpy`
+- `tqdm`
+- `matplotlib` (optional, for plotting)
+
+## Logging & errors
+
+- Uses `src.utils.logger.get_logger` for informative logs
+- Files that fail to load are skipped with warnings
+- Empty spectrograms are skipped
+- Output directories are created automatically
 
 ## Notes
 
-- All spectrogram parameters are inspired by and aligned with Henrique's original notebook
-- The module uses **Slaney normalization** and **HTK mel scale** for consistency
-- Segments are saved as PyTorch tensors for efficient loading during training
-- Global normalization statistics should be used to normalize all segments before feeding to the model
-- The `overlap` parameter enables training data augmentation through sliding window segmentation
+- The pipeline requires a metadata TSV for style extraction — ensure `metadata_file` includes identifiers matching audio filenames (stem only).
+- The `launch.py` helper provides a quick example but does not run automatically when executed as a script unless you call `launch()` (see examples above).
+- The saved normalization file contains per-band means and stds; use them to normalize segments before training.
+
+If you'd like, I can also add a small `if __name__ == '__main__': launch()` block in `launch.py` so it becomes directly runnable. Want me to do that?

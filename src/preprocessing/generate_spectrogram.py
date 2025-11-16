@@ -3,24 +3,27 @@
 # torch imports
 import torch
 import torchaudio
-import torchaudio.functional as F
 import torchaudio.transforms as T
-from torchaudio.utils import download_asset
+
+# sklearn imports
+from sklearn.preprocessing import OneHotEncoder
 
 # viz imports
 import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle
-from IPython.display import Audio
+import numpy as np
+import pandas as pd
 
 # general
 from pathlib import Path
-from typing import List
+from typing import List, Dict
+from tqdm import tqdm
 
 # internal imports
-from ..utils.logger import get_logger
+from ..utils.logger import get_logger 
 
-# Logging setup
 _logger = get_logger("spectrogram")
+
+
 
 class AudioFile:
     def __init__(self, waveform_path: str, 
@@ -41,24 +44,26 @@ class AudioFile:
             raise TypeError(f"'{file_path.suffix}' not allowed.")
         
         self.name = file_path.stem
-        self.waveform, self.sample_rate = torchaudio.load(str(file_path))
+        
+        try:
+            self.waveform, self.sample_rate = torchaudio.load(str(file_path))
+        except Exception as e:
+            _logger.error(f"Error loading audio file {waveform_path}: {e}")
+            raise
+            
         self.n_fft = n_fft
         self.n_mels = n_mels
         self.f_min = f_min
         self.f_max = f_max
 
         # convert to frames
-        # allow passing win_length/hop_length as ms; handle None safely
         win_length_ms = 20 if win_length is None else win_length
         hop_length_ms = 10 if hop_length is None else hop_length
 
         self.win_length = max(1, int(self.sample_rate * win_length_ms / 1000))
         self.hop_length = max(1, int(self.sample_rate * hop_length_ms / 1000))
 
-        # Ensure n_fft is at least as large as win_length. STFT requires win_length <= n_fft.
         if self.n_fft < self.win_length:
-            # Choose the next power of two >= win_length for performance and correctness
-            # found this trick here: https://stackoverflow.com/questions/28857930/bitwise-operations-to-produce-power-of-two-in-python
             new_n_fft = 1 << (self.win_length - 1).bit_length()
             _logger.info(f"Adjusting n_fft from {self.n_fft} -> {new_n_fft} to satisfy win_length <= n_fft")
             self.n_fft = new_n_fft
@@ -66,66 +71,9 @@ class AudioFile:
         self.L = max(1, int(segment_duration * 1000 / hop_length_ms)) # frames per segment
         self.step = max(1, int(self.L * (1 - overlap)))
         self.overlap = overlap
-    
-    def view_spectrogram(self, title=None, ylabel="Mel bins", ax=None, save_path=None):
-        """Display and optionally save a Mel spectrogram.
-
-        Args:
-            title (str): Plot title.
-            ylabel (str): Label for the Y-axis.
-            ax (matplotlib.axes.Axes, optional): Axis to draw on.
-            save_path (str or Path, optional): If provided, saves the figure as an image.
-        """
-        mel = self.mel_spectrogram
-        mel_db = T.AmplitudeToDB("power", 80.0)(mel)
-        mel_db = mel_db.squeeze(0).detach().cpu().numpy()
-
-        # Normalize 0–1 for consistency across samples
-        mel_db -= mel_db.min()
-        mel_db /= mel_db.max() + 1e-8
-
-        # Plot without axes or whitespace
-        plt.figure(figsize=(40, 10), dpi=300)
-        plt.axis("off")
-        plt.imshow(mel_db, origin="lower", aspect="auto", cmap="magma")
-
-        if save_path is not None:
-            path = Path(save_path).with_suffix(".png")
-            path.parent.mkdir(parents=True, exist_ok=True)
-            plt.savefig(path, bbox_inches="tight", pad_inches=0)
-            _logger.info(f"Saved spectrogram: {path}")
         
-    def segment_spectrogram(self) -> List:
-        """Segments spectograms to feed them to dreamer
-        
-        Returns: a list of segmented spectrograms
-        """
-
-        # Compute a 2D mel spectrogram (n_mels x time)
-        mel = self.mel_spectrogram
-
-        # Support both shapes: [1, n_mels, time] and [n_mels, time]
-        if mel.dim() == 3 and mel.shape[0] == 1:
-            mel_2d = mel.squeeze(0)
-        elif mel.dim() == 2:
-            mel_2d = mel
-        else:
-            # Fallback: try to reshape conservatively to [n_mels, time]
-            mel_2d = mel.reshape(mel.shape[-2], mel.shape[-1])
-
-        step = max(1, int(self.L * (1 - self.overlap)))
-        segments = []
-
-        # Loop over time axis
-        for start in range(0, mel_2d.shape[1] - self.L + 1, step):
-            segments.append(mel_2d[:, start:start + self.L])
-        if len(segments) == 0 and self.mel_spectrogram.shape[1] > 0:
-            segments.append(self.mel_spectrogram[:, :min(self.mel_spectrogram.shape[1], self.L)])
-        return segments
-
-    @property
-    def mel_spectrogram(self):
-        mel_spectrogram = T.MelSpectrogram(
+        # Pre-calculate the mel transform
+        self._mel_transform = T.MelSpectrogram(
             sample_rate=self.sample_rate,
             n_fft=self.n_fft,
             win_length=self.win_length,
@@ -138,21 +86,166 @@ class AudioFile:
             norm="slaney",
             n_mels=self.n_mels,
             mel_scale="htk",
-        )
+        ).to(self.waveform.device) # Move transform to device
+    
+    def view_spectrogram(self, title=None, ylabel="Mel bins", ax=None, save_path=None):
+        """Display and optionally save a Mel spectrogram."""
+        mel = self.mel_spectrogram # Use the property
+        mel_db = T.AmplitudeToDB("power", 80.0)(mel)
+        # .numpy() is still required here for plotting with matplotlib
+        mel_db = mel_db.squeeze(0).detach().cpu().numpy() 
 
-        mel_spec = mel_spectrogram(self.waveform)
+        mel_db -= mel_db.min()
+        mel_db /= mel_db.max() + 1e-8
 
+        plt.figure(figsize=(40, 10), dpi=300)
+        plt.axis("off")
+        plt.imshow(mel_db, origin="lower", aspect="auto", cmap="magma")
+
+        if save_path is not None:
+            path = Path(save_path).with_suffix(".png")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            plt.savefig(path, bbox_inches="tight", pad_inches=0)
+            _logger.info(f"Saved spectrogram: {path}")
+        
+    def segment_spectrogram(self) -> List[torch.Tensor]: # Return type hint
+        """Segments spectrograms to feed them to dreamer
+        
+        Returns: a list of segmented spectrograms [n_mels, L]
+        """
+        mel = self.mel_spectrogram
+        if mel.dim() == 3 and mel.shape[0] == 1:
+            mel_2d = mel.squeeze(0)
+        elif mel.dim() == 2:
+            mel_2d = mel
+        else:
+            mel_2d = mel.reshape(mel.shape[-2], mel.shape[-1])
+
+        step = max(1, int(self.L * (1 - self.overlap)))
+        segments = []
+
+        for start in range(0, mel_2d.shape[1] - self.L + 1, step):
+            segments.append(mel_2d[:, start:start + self.L])
+            
+        if len(segments) == 0 and mel_2d.shape[1] > 0:
+            current_L = mel_2d.shape[1]
+            if current_L < self.L:
+                padding = self.L - current_L
+                padded_mel = torch.nn.functional.pad(mel_2d, (0, padding), mode='reflect')
+                segments.append(padded_mel)
+            else:
+                segments.append(mel_2d[:, :self.L])
+                
+        return segments
+
+    @property
+    def mel_spectrogram(self):
+        mel_spec = self._mel_transform(self.waveform)
         return mel_spec
+    
+    @staticmethod
+    def _compute_local_style(mel_segment: torch.Tensor, delta_transform: T.ComputeDeltas) -> torch.Tensor:
+        """
+        Calculates the local style vector from a mel spectrogram segment.
+        """
+        if mel_segment.dim() == 3:
+            mel_segment = mel_segment.squeeze(0)
+        
+        mel_batch = mel_segment.unsqueeze(0) # [1, n_mels, L]
+        delta1_batch = delta_transform(mel_batch)
+        delta2_batch = delta_transform(delta1_batch)
 
-if __name__ == "__main__":
-    # Testing
-    audio_path = "/Users/rcss/Documents/master/spectrogram-dreamer/data/new-clip/common_voice_en_157.mp3"
-    config = {
-                "n_fft": 512, 
-                "win_length": None,
-                "hop_length": 160,
-                "n_mels": 32,
-    }
-    audio_file = AudioFile(audio_path, **config)
+        delta1 = delta1_batch.squeeze(0) # [n_mels, L]
+        delta2 = delta2_batch.squeeze(0) # [n_mels, L]
+        energia = mel_segment.mean(dim=0, keepdim=True) # [1, L]
 
-    audio_file.view_spectrogram("test_spectrogram", save_path=f"./images/{audio_file.name}")
+        feat_delta = delta1.mean(dim=1)  # [n_mels]
+        feat_delta2 = delta2.mean(dim=1) # [n_mels]
+        feat_energia = energia.mean()    # scalar
+
+        vec = torch.cat([
+            feat_energia.unsqueeze(0),
+            feat_delta[:10],
+            feat_delta2[:10],
+        ])
+        
+        return vec.float()
+
+    def extract_style_vectors(self, global_style: torch.Tensor, output_dir: str):
+        """
+        Calculates and saves style vectors (local + global) for each segment
+        of the audio file as PyTorch Tensors (.pt files).
+        """
+        _logger.info(f"Extracting style vectors for {self.name}...")
+        
+        save_path = Path(output_dir) / self.name
+        save_path.mkdir(parents=True, exist_ok=True)
+        
+        device = self.waveform.device
+        delta_transform = T.ComputeDeltas().to(device)
+        global_style_tensor = global_style.to(device)
+        segments = self.segment_spectrogram()
+
+        if not segments:
+            _logger.warning(f"No segments generated for {self.name}. Skipping style vector extraction.")
+            return
+
+        for i, seg_mel in enumerate(segments):
+            seg_mel = seg_mel.to(device)
+            local_style = self._compute_local_style(seg_mel, delta_transform)
+            style_vector = torch.cat([local_style, global_style_tensor], dim=0)
+            
+            # Save as .pt file
+            seg_name = f"{self.name}_{i:04d}.pt" 
+            seg_save_path = save_path / seg_name
+            torch.save(style_vector.cpu(), seg_save_path) # Save tensor to CPU
+            
+        _logger.info(f"Saved {len(segments)} style vectors (as .pt) to {save_path}")
+    
+    @staticmethod
+    def load_global_styles(metadata_file: str) -> Dict[str, torch.Tensor]:
+        """
+        Loads metadata, creates one-hot encoded global style vectors,
+        and builds a map {file_stem: global_style_tensor}.
+        
+        Args:
+            metadata_file: Path to the .tsv metadata file.
+        Returns:
+            A dictionary mapping file stem (str) to global style (torch.Tensor).
+        """
+        _logger.info(f"Loading metadata from {metadata_file} to build global styles...")
+        try:
+            df = pd.read_csv(metadata_file, sep='\t', low_memory=False)
+            
+            df = df.drop(columns=["client_id", "sentence", "up_votes", "down_votes"], errors='ignore')
+
+            # One-hot encoding for gender
+            generos = np.array([row["gender"] for _, row in df.iterrows()]).reshape(-1, 1)
+            enc_gen = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
+            gen_vecs = enc_gen.fit_transform(generos)
+
+            # One-hot encoding for accent
+            sotaques = np.array([row["accent"] for _, row in df.iterrows()]).reshape(-1, 1)
+            enc_acc = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
+            acc_vecs = enc_acc.fit_transform(sotaques)
+
+            # One-hot encoding for age
+            idades = np.array([row["age"] for _, row in df.iterrows()]).reshape(-1, 1)
+            enc_idade = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
+            idade_vecs = enc_idade.fit_transform(idades)
+
+            global_styles = np.concatenate([gen_vecs, acc_vecs, idade_vecs], axis=1)
+            global_styles_tensor = torch.tensor(global_styles, dtype=torch.float32)
+            
+            _logger.info("Building file-to-style map...")
+            style_map = {}
+            for idx, row in tqdm(df.iterrows(), total=len(df), desc="Building style map"):
+                base = Path(row["path"]).stem
+                style_map[base] = global_styles_tensor[idx]
+            
+            _logger.info(f"Style map built with {len(style_map)} entries.")
+            return style_map
+
+        except Exception as e:
+            _logger.error(f"Error loading global styles: {e}")
+            raise

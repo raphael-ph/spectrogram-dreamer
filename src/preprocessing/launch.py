@@ -6,6 +6,7 @@ def launch():
     # Example usage (adjust paths as needed)
     p = Pipeline(input_dir="data/1_validated-audio/",
                  output_dir="data/2_mel-spectrograms/",
+                 style_vector_dir="data/3_style-vectors/",
                  file_extension="mp3",
                  n_fft=1024,
                  win_length=20,
@@ -21,4 +22,4 @@ def launch():
     #                       clips_dir='data/new-clip/',
     #                       min_votes=2)
 
-    p.process()
+    p.process(metadata_file='data/data-file/validated.tsv')

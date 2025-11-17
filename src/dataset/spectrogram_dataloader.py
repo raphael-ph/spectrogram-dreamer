@@ -1,7 +1,11 @@
 # torch imports
 from torch.utils.data import DataLoader, Dataset
 
-def create_dataloader(dataset: Dataset, batch_size: int = 16, shuffle: bool = True, num_workers: int = 0):
+def create_dataloader(dataset: Dataset, 
+                      batch_size: int = 50, # same batch size used on original Dreamer implementation
+                      shuffle: bool = True, 
+                      num_workers: int = 0
+                      ):
     """
     Creates a DataLoader suitable for the pre-loaded Dreamer dataset.
     num_workers is set to 0 to prevent memory duplication of the large dataset.

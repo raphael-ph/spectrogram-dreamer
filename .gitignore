@@ -210,3 +210,12 @@ __marimo__/
 data/
 .DS_Store
 logs/
+
+# MLflow
+mlruns/
+mlartifacts/
+checkpoints/
+plots/
+*.pt
+*.pth
+*.ckpt

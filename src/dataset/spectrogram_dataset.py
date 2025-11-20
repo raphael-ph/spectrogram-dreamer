@@ -48,7 +48,7 @@ class SpectrogramDataset(Dataset):
 
     # --- Dataset methods ---
     def __len__(self):
-        return len(self.samples)
+        return len(self.sequence_indices)
 
     def __getitem__(self, index):
         episode_name, start_index = self.sequence_indices[index]

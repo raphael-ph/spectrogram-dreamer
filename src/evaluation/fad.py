@@ -9,6 +9,7 @@
 # the realism of the reference dataset. Since common-voice does not have superior quality for most of the
 # audios, checking if our model was able to represent this is also interesting
 # 
+# original paper: https://arxiv.org/pdf/1812.08466
 # For this implementation, we'll be using this library https://pypi.org/project/frechet-audio-distance/
 
 # general

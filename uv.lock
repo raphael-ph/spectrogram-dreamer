@@ -547,6 +547,15 @@ wheels = [
 ]
 
 [[package]]
+name = "fastdtw"
+version = "0.3.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/99/43/30f2d8db076f216b15c10db663b46e22d1750b1ebacd7af6e62b83d6ab98/fastdtw-0.3.4.tar.gz", hash = "sha256:2350fa6ec36bcad186eaf81f46eff35181baf04e324f522de8aeb43d0243f64f", size = 133402, upload-time = "2019-10-07T16:02:29.982Z" }
+
+[[package]]
 name = "filelock"
 version = "3.20.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1288,6 +1297,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c7/74/97e72a36efd4ae2bccb3463284300f8953f199b5ffbc04cbbb0ec78f74b1/matplotlib_inline-0.2.1.tar.gz", hash = "sha256:e1ee949c340d771fc39e241ea75683deb94762c8fa5f2927ec57c83c4dffa9fe", size = 8110, upload-time = "2025-10-23T09:00:22.126Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/af/33/ee4519fa02ed11a94aef9559552f3b17bb863f2ecfe1a35dc7f548cde231/matplotlib_inline-0.2.1-py3-none-any.whl", hash = "sha256:d56ce5156ba6085e00a9d54fead6ed29a9c47e215cd1bba2e976ef39f5710a76", size = 9516, upload-time = "2025-10-23T09:00:20.675Z" },
+]
+
+[[package]]
+name = "mel-cepstral-distance"
+version = "0.0.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "fastdtw" },
+    { name = "numpy" },
+    { name = "scipy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/03/4d/b69222e53e6540c26f921b6e285f2161babdebd76fa597ea41614c68c55b/mel_cepstral_distance-0.0.4.tar.gz", hash = "sha256:8b395d909ee29720408229e0d0bc0db6569bf637a9e18243a881dbae68f16cac", size = 62347808, upload-time = "2025-04-14T17:02:10.331Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4c/f8/f1ad7f5f24a8e783b0f17313d6000a12cb44dd91dd16f005456e1f6cb44c/mel_cepstral_distance-0.0.4-py3-none-any.whl", hash = "sha256:b49d85ff34f70c66fe236a1f4c1a0ed9c09083afa47b66690c57bde50ebd6015", size = 21368, upload-time = "2025-04-14T17:01:49.548Z" },
 ]
 
 [[package]]
@@ -2464,6 +2487,7 @@ dependencies = [
     { name = "markupsafe" },
     { name = "matplotlib" },
     { name = "matplotlib-inline" },
+    { name = "mel-cepstral-distance" },
     { name = "mlflow" },
     { name = "mpmath" },
     { name = "networkx" },
@@ -2519,6 +2543,7 @@ requires-dist = [
     { name = "markupsafe", specifier = "==3.0.3" },
     { name = "matplotlib", specifier = "==3.10.7" },
     { name = "matplotlib-inline", specifier = "==0.2.1" },
+    { name = "mel-cepstral-distance", specifier = ">=0.0.4" },
     { name = "mlflow", specifier = ">=3.6.0" },
     { name = "mpmath", specifier = "==1.3.0" },
     { name = "networkx", specifier = "==3.5" },

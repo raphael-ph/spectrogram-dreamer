@@ -27,24 +27,32 @@ class Decoder(nn.Module):
                  cnn_depth: int = 32):
         super().__init__()
         
+        self.cnn_depth = cnn_depth
+        
         # MLP to expand latent state
+        # Initial spatial dimensions after encoder: (4, 3) for input (64, 50)
+        # This should match the encoder's output spatial dimensions
         latent_size = h_state_size + z_state_size
+        mlp_output_size = cnn_depth * 8 * 4 * 3  # (cnn_depth * 8 channels, 4 height, 3 width)
         self.mlp = nn.Sequential(
             nn.Linear(latent_size, 200),
             nn.ELU(),
-            nn.Linear(200, 512)  # Output will be reshaped to (B, 32*8, 2, 1)
+            nn.Linear(200, mlp_output_size)
         )
         
         # Transposed convolutions to upsample
+        # With padding=1, kernel=4, stride=2: out = (in - 1) * stride - 2*padding + kernel + output_padding
+        # Working backwards from (64, 50): need (4,3) → (8,6) → (16,12) → (32,25) → (64,50)
+        # output_padding=(0,1) only on layer 3 to get exact dimensions
         d = cnn_depth
         self.deconv = nn.Sequential(
-            nn.ConvTranspose2d(d * 8, d * 4, kernel_size=4, stride=2),
+            nn.ConvTranspose2d(d * 8, d * 4, kernel_size=4, stride=2, padding=1),
             nn.ELU(),
-            nn.ConvTranspose2d(d * 4, d * 2, kernel_size=4, stride=2),
+            nn.ConvTranspose2d(d * 4, d * 2, kernel_size=4, stride=2, padding=1),
             nn.ELU(),
-            nn.ConvTranspose2d(d * 2, d, kernel_size=4, stride=2),
+            nn.ConvTranspose2d(d * 2, d, kernel_size=4, stride=2, padding=1, output_padding=(0, 1)),
             nn.ELU(),
-            nn.ConvTranspose2d(d, out_channels, kernel_size=4, stride=2),
+            nn.ConvTranspose2d(d, out_channels, kernel_size=4, stride=2, padding=1),
         )
         
     def forward(self, h_state, z_state):
@@ -71,8 +79,8 @@ class Decoder(nn.Module):
         x = self.mlp(latent)
         _logger.debug(f"After MLP: {x.shape}")
         
-        # Reshape to feature map
-        x = x.view(-1, 256, 2, 1)  # (B*T, 256, 2, 1)
+        # Reshape to feature map (cnn_depth * 8 channels, 4x3 spatial)
+        x = x.view(-1, self.cnn_depth * 8, 4, 3)
         _logger.debug(f"Reshaped: {x.shape}")
         
         # Deconvolution

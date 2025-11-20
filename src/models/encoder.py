@@ -65,18 +65,19 @@ class ConvEncoder(nn.Module):
                  cnn_depth: int = 32
                  ):
         super().__init__()
-        self.out_dim = cnn_depth * 8 * 2 * 1
+        self.out_dim = cnn_depth * 8 * 4 * 3  # Updated for padded convolutions (4x3 spatial output)
         kernels = (4, 4, 4, 4)
         stride = 2
+        padding = 1  # Add padding to handle smaller inputs
         d = cnn_depth
         self.model = nn.Sequential(
-            nn.Conv2d(in_channels, d, kernels[0], stride),
+            nn.Conv2d(in_channels, d, kernels[0], stride, padding),
             nn.ELU(), # paper specifies ELU as the activation function
-            nn.Conv2d(d, d * 2, kernels[1], stride),
+            nn.Conv2d(d, d * 2, kernels[1], stride, padding),
             nn.ELU(),
-            nn.Conv2d(d * 2, d * 4, kernels[2], stride),
+            nn.Conv2d(d * 2, d * 4, kernels[2], stride, padding),
             nn.ELU(),
-            nn.Conv2d(d * 4, d * 8, kernels[3], stride),
+            nn.Conv2d(d * 4, d * 8, kernels[3], stride, padding),
             nn.ELU(),
             nn.Flatten()
         )
@@ -84,8 +85,8 @@ class ConvEncoder(nn.Module):
     def forward(self, x):
         _logger.debug(f"x shape before flattening: {x.shape}") # expecting here (B, T, C, n_mels, L)
         
-        x, batch_dim = flatten_batch(x, 2)
-        _logger.debug(f"x shape after flattened: {x.shape}") # expecting here (B, X)
+        x, batch_dim = flatten_batch(x, 3)  # Keep last 3 dims (C, H, W) for CNN
+        _logger.debug(f"x shape after flattened: {x.shape}") # expecting here (B*T, C, H, W)
 
         y = self.model(x)
         _logger.debug(f"y shape flattened: {y.shape}")

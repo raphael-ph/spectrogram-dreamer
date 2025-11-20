@@ -5,6 +5,7 @@ import torch
 import torch.nn.functional as F
 from torch.optim import Adam
 from torch.utils.data import DataLoader
+from torch.distributions import Normal
 import mlflow
 import mlflow.pytorch
 from pathlib import Path
@@ -83,10 +84,9 @@ class DreamerTrainer:
         self.world_optimizer.step()
         
         # 2. Train Actor-Critic via imagination
-        with torch.no_grad():
-            # Get final states from world model
-            h_final = model_output['h_states'][:, -1]  # (B, h_state_size)
-            z_final = model_output['z_states'][:, -1]  # (B, z_state_size)
+        # Get final states from world model (detach to stop gradients from flowing back to world model)
+        h_final = model_output['h_states'][:, -1].detach()  # (B, h_state_size)
+        z_final = model_output['z_states'][:, -1].detach()  # (B, z_state_size)
         
         # Imagine trajectories
         actor_loss, critic_loss = self._train_actor_critic(h_final, z_final)
@@ -111,7 +111,7 @@ class DreamerTrainer:
         Returns:
             Tuple of (actor_loss, critic_loss)
         """
-        # Imagine trajectory
+        # Imagine trajectory with world model frozen
         with torch.no_grad():
             imagined = self.model.imagine_trajectory(h_state, z_state, self.imagination_horizon)
         
@@ -124,13 +124,14 @@ class DreamerTrainer:
         total_rewards = rewards + 0.1 * style_rewards
         
         # Train Critic
+        # Recompute values WITH gradients on frozen latent states
         self.critic_optimizer.zero_grad()
         
         values = self.model.critic(h_imag, z_imag).squeeze(-1)  # (B, H+1)
         
         # Compute TD-lambda targets
         with torch.no_grad():
-            targets = self._compute_lambda_returns(total_rewards.squeeze(-1), values)
+            targets = self._compute_lambda_returns(total_rewards.squeeze(-1), values.detach())
         
         critic_loss = F.mse_loss(values[:, :-1], targets)
         critic_loss.backward()
@@ -141,13 +142,32 @@ class DreamerTrainer:
         # Train Actor
         self.actor_optimizer.zero_grad()
         
-        # Re-compute values without gradients through critic
-        with torch.no_grad():
-            baseline = self.model.critic(h_imag[:, :-1], z_imag[:, :-1]).squeeze(-1)
+        # Re-imagine trajectory WITH gradients through actor
+        # The latent states from first imagination are used as starting points
+        # We compute actor loss as negative expected value (to maximize value)
+        h_t = h_state
+        z_t = z_state
+        actor_values = []
         
-        # Actor loss: maximize expected return
-        # We use the lambda returns as the target
-        actor_loss = -(targets - baseline).mean()
+        for t in range(self.imagination_horizon):
+            # Generate action with gradients
+            action = self.model.actor(h_t, z_t)
+            
+            # Step through RSSM without gradients (world model is frozen)
+            with torch.no_grad():
+                h_t = self.model.rssm.gru(torch.cat([z_t, action], dim=-1), h_t)
+                prior_params = self.model.rssm.prior(h_t)
+                prior_mean, prior_std = torch.chunk(prior_params, 2, dim=-1)
+                prior_std = F.softplus(prior_std) + 0.1
+                z_t = Normal(prior_mean, prior_std).rsample()
+            
+            # Compute value estimate WITH gradients through critic
+            # (but critic params won't be updated here, only actor params)
+            value_t = self.model.critic(h_t.unsqueeze(1), z_t.unsqueeze(1)).squeeze()
+            actor_values.append(value_t)
+        
+        # Actor objective: maximize expected values
+        actor_loss = -torch.stack(actor_values).mean()
         actor_loss.backward()
         
         torch.nn.utils.clip_grad_norm_(self.model.actor.parameters(), max_norm=100.0)

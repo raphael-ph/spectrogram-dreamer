@@ -9,8 +9,8 @@
 # the realism of the reference dataset. Since common-voice does not have superior quality for most of the
 # audios, checking if our model was able to represent this is also interesting
 # 
-# original paper: https://arxiv.org/pdf/1812.08466
-# For this implementation, we'll be using this library https://pypi.org/project/frechet-audio-distance/
+# Original paper: https://arxiv.org/pdf/1812.08466
+# For this implementation, we'll be using this library: https://pypi.org/project/frechet-audio-distance/
 
 # general
 import os
@@ -94,13 +94,16 @@ class FAD(BaseEvaluator):
 
         allowed_models_set = {"vggish", "pann", "clap", "encodec"}
         if embedding_model.lower() not in allowed_models_set:
+            _logger.error(f"Selected embedding model '{embedding_model}' is not allowed. Allowed models are: '{"', '".join(m for m in allowed_models_set)}'")
             raise ValueError(f"Selected embedding model '{embedding_model}' is not allowed. Allowed models are: '{"', '".join(m for m in allowed_models_set)}'")
             
         # using CLAP
         if embedding_model.lower() == "clap":
             if not submodel_name:
+                _logger.error((f"submodel_name not specified"))
                 raise ValueError(f"submodel_name not specified")
             if not enable_fusion:
+                _logger.error((f"submodel_name not specified"))
                 raise ValueError(f"enable_fusion value not specified")
             
             self.frechet = FrechetAudioDistance(
@@ -114,6 +117,7 @@ class FAD(BaseEvaluator):
         # using EnCodec
         elif embedding_model.lower() == "encodec":
             if not channels:
+                _logger.error(f"channels not specified")
                 raise ValueError(f"channels not specified")
             
             self.frechet = FrechetAudioDistance(

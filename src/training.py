@@ -15,6 +15,7 @@ from datetime import datetime
 from src.models import DreamerModel
 from src.dataset.spectrogram_dataset import SpectrogramDataset
 from src.dataset.spectrogram_dataloader import create_dataloader
+from src.dataset.spectrogram_hdf5_dataset import SpectrogramH5Dataset
 from src.utils.logger import get_logger
 
 _logger = get_logger("training", level="INFO")
@@ -373,18 +374,24 @@ if __name__ == "__main__":
     _logger.info("Loading dataset...")
     spec_path = "data/2_mel-spectrograms"
     style_path = "data/3_style-vectors"
-    
+
     try:
-        dataset = SpectrogramDataset(spec_path, style_path)
-        
+        # allow passing an HDF5 consolidated dataset file instead of two folders
+        if Path(spec_path).suffix == '.h5' or Path(style_path).suffix == '.h5':
+            # if a single .h5 file is used, prefer it
+            h5_path = spec_path if Path(spec_path).suffix == '.h5' else style_path
+            dataset = SpectrogramH5Dataset(h5_path)
+        else:
+            dataset = SpectrogramDataset(spec_path, style_path)
+
         _logger.info(f"Dataset loaded with {len(dataset)} samples")
         _logger.info("Starting training with MLflow tracking...")
-        
+
         train(
-            model, 
-            dataset, 
-            num_epochs=100, 
-            batch_size=50, 
+            model,
+            dataset,
+            num_epochs=100,
+            batch_size=50,
             device='cuda',
             experiment_name="dreamer-spectrogram",
             checkpoint_freq=10

@@ -16,26 +16,46 @@ def main():
     """Main entry point for training Dreamer model"""
     
     parser = argparse.ArgumentParser(description="Train Dreamer model on spectrograms")
+    
+    # Dataset mode
+    parser.add_argument("--use-consolidated", action="store_true",
+                        help="Use consolidated dataset (RECOMMENDED - 40-90%% space savings)")
+    parser.add_argument("--dataset-path", type=str, default="data/dataset_consolidated.pt",
+                        help="Path to consolidated dataset file")
+    
+    # Original dataset paths (deprecated)
     parser.add_argument("--spec-path", type=str, default="data/2_mel-spectrograms",
-                        help="Path to spectrogram data")
+                        help="Path to spectrogram data (original mode only)")
     parser.add_argument("--style-path", type=str, default="data/3_style-vectors",
-                        help="Path to style vectors")
+                        help="Path to style vectors (original mode only)")
+    
+    # Training parameters
     parser.add_argument("--epochs", type=int, default=100,
                         help="Number of training epochs")
     parser.add_argument("--batch-size", type=int, default=50,
                         help="Batch size")
+    parser.add_argument("--sequence-length", type=int, default=10,
+                        help="Sequence length for temporal modeling")
+    parser.add_argument("--val-split", type=float, default=0.1,
+                        help="Validation split ratio")
     parser.add_argument("--checkpoint-freq", type=int, default=10,
                         help="Save checkpoint every N epochs")
+    
+    # MLflow parameters
     parser.add_argument("--experiment-name", type=str, default="dreamer-spectrogram",
                         help="MLflow experiment name")
     parser.add_argument("--run-name", type=str, default=None,
                         help="MLflow run name")
+    
+    # Model parameters
     parser.add_argument("--h-state-size", type=int, default=200,
                         help="Size of deterministic state")
     parser.add_argument("--z-state-size", type=int, default=30,
                         help="Size of stochastic state")
     parser.add_argument("--action-size", type=int, default=128,
                         help="Size of style action vector")
+    
+    # Testing
     parser.add_argument("--test-mode", action="store_true",
                         help="Run in test mode with dummy data")
     
@@ -63,34 +83,76 @@ def main():
     _logger.info("Loading dataset...")
     try:
         if not args.test_mode:
-            dataset = SpectrogramDataset(args.spec_path, args.style_path)
-            _logger.info(f"Dataset loaded with {len(dataset)} samples")
-            
-            # Show sample
-            sample = dataset[0]
-            _logger.info(f"Sample observation shape: {sample['observation'].shape}")
-            _logger.info(f"Sample action shape: {sample['action'].shape}")
-            _logger.info(f"Sample rewards shape: {sample['rewards'].shape}")
-            
-            # Start training with MLflow
-            _logger.info("Starting training with MLflow tracking...")
-            train(
-                model, 
-                dataset, 
-                num_epochs=args.epochs, 
-                batch_size=args.batch_size, 
-                device=device,
-                experiment_name=args.experiment_name,
-                run_name=args.run_name,
-                checkpoint_freq=args.checkpoint_freq
-            )
-            
-            _logger.info("Training complete! Check mlruns/ directory for results.")
-            _logger.info("To view results: mlflow ui")
+            if args.use_consolidated:
+                # NEW: Use consolidated dataset (RECOMMENDED)
+                _logger.info("✅ Using CONSOLIDATED dataset mode")
+                _logger.info(f"📂 Loading from: {args.dataset_path}")
+                
+                from src.data import create_train_val_dataloaders, get_dataset_info
+                
+                # Get dataset info
+                info = get_dataset_info(args.dataset_path)
+                _logger.info(f"📊 Dataset info:")
+                _logger.info(f"   - Total samples: {info['num_samples']}")
+                _logger.info(f"   - Unique files: {info['num_unique_files']}")
+                _logger.info(f"   - File size: {info['file_size_mb']:.2f} MB")
+                
+                # Create train/val dataloaders
+                train_dataloader, val_dataloader = create_train_val_dataloaders(
+                    dataset_path=args.dataset_path,
+                    val_split=args.val_split,
+                    batch_size=args.batch_size,
+                    sequence_length=args.sequence_length,
+                    num_workers=4,
+                    pin_memory=(device == "cuda")
+                )
+                
+                _logger.info(f"✅ Dataloaders created:")
+                _logger.info(f"   - Train batches: {len(train_dataloader)}")
+                _logger.info(f"   - Val batches: {len(val_dataloader)}")
+                
+                # TODO: Integrate with training loop
+                _logger.info("⚠️  Training loop integration pending - see docs/CONSOLIDATED_DATASET.md")
+                _logger.info("💡 You can start using the dataloaders now:")
+                _logger.info("   for spectrograms, styles, meta in train_dataloader:")
+                _logger.info("       # spectrograms: [batch, seq_len, n_mels, time_frames]")
+                _logger.info("       # Train model...")
+                
+            else:
+                # Original dataset mode (deprecated)
+                _logger.info("⚠️  Using ORIGINAL dataset mode (deprecated)")
+                _logger.info("💡 Consider using --use-consolidated for 40-90% space savings")
+                
+                dataset = SpectrogramDataset(args.spec_path, args.style_path)
+                _logger.info(f"Dataset loaded with {len(dataset)} samples")
+                
+                # Show sample
+                sample = dataset[0]
+                _logger.info(f"Sample observation shape: {sample['observation'].shape}")
+                _logger.info(f"Sample action shape: {sample['action'].shape}")
+                _logger.info(f"Sample rewards shape: {sample['rewards'].shape}")
+                
+                # Start training with MLflow
+                _logger.info("Starting training with MLflow tracking...")
+                train(
+                    model, 
+                    dataset, 
+                    num_epochs=args.epochs, 
+                    batch_size=args.batch_size, 
+                    device=device,
+                    experiment_name=args.experiment_name,
+                    run_name=args.run_name,
+                    checkpoint_freq=args.checkpoint_freq
+                )
+                
+                _logger.info("Training complete! Check mlruns/ directory for results.")
+                _logger.info("To view results: mlflow ui")
         
     except FileNotFoundError as e:
         _logger.error(f"Dataset not found: {e}")
-        _logger.info("Please run the preprocessing pipeline first or adjust paths")
+        _logger.info("Please run the preprocessing pipeline first:")
+        _logger.info("  python run_pipeline.py --consolidated --use-float16")
+        _logger.info("Or adjust paths with --dataset-path")
         _logger.info("You can test individual components with --test-mode")
         args.test_mode = True
     

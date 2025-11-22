@@ -20,8 +20,8 @@ def main():
     # Dataset mode
     parser.add_argument("--use-consolidated", action="store_true",
                         help="Use consolidated dataset (RECOMMENDED - 40-90%% space savings)")
-    parser.add_argument("--dataset-path", type=str, default="data/dataset_consolidated.pt",
-                        help="Path to consolidated dataset file")
+    parser.add_argument("--dataset-path", type=str, default="data/dataset_consolidated.h5",
+                        help="Path to consolidated dataset file (.h5 or .pt)")
     
     # Original dataset paths (deprecated)
     parser.add_argument("--spec-path", type=str, default="data/2_mel-spectrograms",
@@ -84,44 +84,72 @@ def main():
     try:
         if not args.test_mode:
             if args.use_consolidated:
-                # NEW: Use consolidated dataset (RECOMMENDED)
-                _logger.info("✅ Using CONSOLIDATED dataset mode")
-                _logger.info(f"📂 Loading from: {args.dataset_path}")
+                # Check if it's HDF5 or PyTorch format
+                dataset_path = Path(args.dataset_path)
+                is_hdf5 = dataset_path.suffix == '.h5'
                 
-                from src.data import create_train_val_dataloaders, get_dataset_info
+                if is_hdf5:
+                    _logger.info("✅ Using HDF5 CONSOLIDATED dataset")
+                    _logger.info(f"📂 Loading from: {args.dataset_path}")
+                    
+                    from src.dataset import create_hdf5_dataloaders, get_hdf5_dataset_info
+                    
+                    # Get dataset info
+                    info = get_hdf5_dataset_info(args.dataset_path)
+                    _logger.info(f"📊 Dataset info:")
+                    _logger.info(f"   - Format: {info['format']}")
+                    _logger.info(f"   - Total samples: {info['num_samples']}")
+                    _logger.info(f"   - Unique files: {info['num_unique_files']}")
+                    _logger.info(f"   - File size: {info['file_size_mb']:.2f} MB ({info['file_size_mb']/1024:.2f} GB)")
+                    _logger.info(f"   - Spectrogram shape: {info['spectrogram_shape']}")
+                    _logger.info(f"   - Style shape: {info['style_shape']}")
+                    
+                    # Create train/val dataloaders
+                    train_dataloader, val_dataloader = create_hdf5_dataloaders(
+                        dataset_path=args.dataset_path,
+                        val_split=args.val_split,
+                        batch_size=args.batch_size,
+                        num_workers=4,
+                        pin_memory=(device == "cuda")
+                    )
+                else:
+                    _logger.info("✅ Using PyTorch CONSOLIDATED dataset")
+                    _logger.info(f"📂 Loading from: {args.dataset_path}")
+                    
+                    from src.dataset import create_train_val_dataloaders, get_dataset_info
+                    
+                    # Get dataset info
+                    info = get_dataset_info(args.dataset_path)
+                    _logger.info(f"📊 Dataset info:")
+                    _logger.info(f"   - Total samples: {info['num_samples']}")
+                    _logger.info(f"   - Unique files: {info['num_unique_files']}")
+                    _logger.info(f"   - File size: {info['file_size_mb']:.2f} MB")
+                    
+                    # Create train/val dataloaders
+                    train_dataloader, val_dataloader = create_train_val_dataloaders(
+                        dataset_path=args.dataset_path,
+                        val_split=args.val_split,
+                        batch_size=args.batch_size,
+                        sequence_length=args.sequence_length,
+                        num_workers=4,
+                        pin_memory=(device == "cuda")
+                    )
                 
-                # Get dataset info
-                info = get_dataset_info(args.dataset_path)
-                _logger.info(f"📊 Dataset info:")
-                _logger.info(f"   - Total samples: {info['num_samples']}")
-                _logger.info(f"   - Unique files: {info['num_unique_files']}")
-                _logger.info(f"   - File size: {info['file_size_mb']:.2f} MB")
-                
-                # Create train/val dataloaders
-                train_dataloader, val_dataloader = create_train_val_dataloaders(
-                    dataset_path=args.dataset_path,
-                    val_split=args.val_split,
-                    batch_size=args.batch_size,
-                    sequence_length=args.sequence_length,
-                    num_workers=4,
-                    pin_memory=(device == "cuda")
-                )
-                
-                _logger.info(f"✅ Dataloaders created:")
+                _logger.info(f"Dataloaders created:")
                 _logger.info(f"   - Train batches: {len(train_dataloader)}")
                 _logger.info(f"   - Val batches: {len(val_dataloader)}")
                 
                 # TODO: Integrate with training loop
-                _logger.info("⚠️  Training loop integration pending - see docs/CONSOLIDATED_DATASET.md")
-                _logger.info("💡 You can start using the dataloaders now:")
+                _logger.info("Training loop integration pending - see docs/CONSOLIDATED_DATASET.md")
+                _logger.info("You can start using the dataloaders now:")
                 _logger.info("   for spectrograms, styles, meta in train_dataloader:")
                 _logger.info("       # spectrograms: [batch, seq_len, n_mels, time_frames]")
                 _logger.info("       # Train model...")
                 
             else:
                 # Original dataset mode (deprecated)
-                _logger.info("⚠️  Using ORIGINAL dataset mode (deprecated)")
-                _logger.info("💡 Consider using --use-consolidated for 40-90% space savings")
+                _logger.info("Using ORIGINAL dataset mode (deprecated)")
+                _logger.info("Consider using --use-consolidated for 40-90% space savings")
                 
                 dataset = SpectrogramDataset(args.spec_path, args.style_path)
                 _logger.info(f"Dataset loaded with {len(dataset)} samples")
@@ -161,7 +189,9 @@ def main():
         _logger.info("Running in test mode with dummy data...")
         batch_size = 4
         seq_len = 50
-        dummy_obs = torch.randn(batch_size, seq_len, 1, 64, 10)
+        # Match the HDF5 dataset spectrogram shape: (64, 10) -> (n_mels, time_frames)
+        # But we need time_frames=50 to match the model's expected input
+        dummy_obs = torch.randn(batch_size, seq_len, 1, 64, 50)
         dummy_actions = torch.randn(batch_size, seq_len, 128)
         
         model.eval()

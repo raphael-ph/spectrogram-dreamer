@@ -357,8 +357,8 @@ def create_consolidated_dataset(
     logger.info(f"   Arquivos economizados: {total_segments} → 1")
     
     logger.info("\nComo usar:")
-    logger.info("   from src.data.dataloader import create_dataloader")
-    logger.info(f"   dataloader = create_dataloader('{final_output}', batch_size=32)")
+    logger.info("   from src.dataset import create_train_val_dataloaders")
+    logger.info(f"   train_loader, val_loader = create_train_val_dataloaders('{final_output}', batch_size=32)")
     logger.info("=" * 80 + "\n")
     
     return config

@@ -69,24 +69,48 @@ class SpectrogramH5Dataset(Dataset):
         }
 
     def _group_by_file_id(self) -> Dict[str, List[int]]:
+        """Group segment indices by file_id (episode)
+        
+        Optimized to load data in chunks instead of one-by-one
+        """
+        _logger.info(f"Grouping {self.specs.shape[0]:,} segments by file_id...")
+        
         mapping: Dict[str, List[int]] = {}
-        for i in range(self.specs.shape[0]):
-            raw = self.file_ids[i]
-            # h5py may return bytes or str depending on dtype; normalize to str
-            if isinstance(raw, (bytes, bytearray)):
-                file_id = raw.decode('utf-8')
-            else:
-                file_id = str(raw)
-
-            if file_id not in mapping:
-                mapping[file_id] = []
-            mapping[file_id].append(i)
-
-        # sort by seg_idx within each file
+        total_samples = self.specs.shape[0]
+        
+        # Load in chunks to avoid memory issues with huge datasets
+        chunk_size = 100000  # Process 100k at a time
+        
+        for start_idx in range(0, total_samples, chunk_size):
+            end_idx = min(start_idx + chunk_size, total_samples)
+            
+            # Load chunk of file_ids and seg_idx
+            file_ids_chunk = self.file_ids[start_idx:end_idx]
+            seg_idx_chunk = self.seg_idx[start_idx:end_idx]
+            
+            # Process chunk
+            for i, (raw_fid, seg_id) in enumerate(zip(file_ids_chunk, seg_idx_chunk)):
+                global_idx = start_idx + i
+                
+                # Normalize file_id to string
+                if isinstance(raw_fid, (bytes, bytearray)):
+                    file_id = raw_fid.decode('utf-8')
+                else:
+                    file_id = str(raw_fid)
+                
+                if file_id not in mapping:
+                    mapping[file_id] = []
+                mapping[file_id].append((global_idx, int(seg_id)))
+            
+            if (start_idx // chunk_size + 1) % 10 == 0:
+                _logger.info(f"  Processed {end_idx:,}/{total_samples:,} segments...")
+        
+        # Sort by seg_idx within each file
         for fid in mapping:
-            mapping[fid].sort(key=lambda idx: int(self.seg_idx[idx]))
-
-        _logger.info(f"Found {len(mapping)} episodes in {self.h5_path}")
+            mapping[fid].sort(key=lambda x: x[1])  # Sort by seg_idx
+            mapping[fid] = [idx for idx, _ in mapping[fid]]  # Keep only indices
+        
+        _logger.info(f"✅ Found {len(mapping):,} episodes in {self.h5_path}")
         return mapping
 
     def _generate_seq_idx(self) -> List[Tuple[str, int]]:

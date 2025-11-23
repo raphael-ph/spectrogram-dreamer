@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import List, Tuple, Dict
 import torch
 from torch.utils.data import Dataset
+from tqdm import tqdm
 from ..utils.logger import get_logger
 
 _logger = get_logger("spectrogram_hdf5_dataset", level="INFO")
@@ -80,8 +81,11 @@ class SpectrogramH5Dataset(Dataset):
         
         # Load in chunks to avoid memory issues with huge datasets
         chunk_size = 100000  # Process 100k at a time
+        num_chunks = (total_samples + chunk_size - 1) // chunk_size
         
-        for start_idx in range(0, total_samples, chunk_size):
+        # Use tqdm for progress bar
+        for chunk_idx in tqdm(range(num_chunks), desc="Grouping segments by file_id", ncols=100):
+            start_idx = chunk_idx * chunk_size
             end_idx = min(start_idx + chunk_size, total_samples)
             
             # Load chunk of file_ids and seg_idx
@@ -101,9 +105,6 @@ class SpectrogramH5Dataset(Dataset):
                 if file_id not in mapping:
                     mapping[file_id] = []
                 mapping[file_id].append((global_idx, int(seg_id)))
-            
-            if (start_idx // chunk_size + 1) % 10 == 0:
-                _logger.info(f"  Processed {end_idx:,}/{total_samples:,} segments...")
         
         # Sort by seg_idx within each file
         for fid in mapping:

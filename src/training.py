@@ -9,6 +9,7 @@ import mlflow
 import mlflow.pytorch
 from pathlib import Path
 from datetime import datetime
+from tqdm import tqdm
 
 from src.models import DreamerModel
 from src.dataset.spectrogram_dataset import SpectrogramDataset
@@ -426,7 +427,14 @@ def train_consolidated(model, train_dataloader, val_dataloader, num_epochs=100,
             
             _logger.info(f"Epoch {epoch + 1}/{num_epochs} - Training...")
             
-            for batch_idx, batch in enumerate(train_dataloader):
+            # Add tqdm progress bar
+            train_pbar = tqdm(enumerate(train_dataloader), 
+                             total=len(train_dataloader),
+                             desc=f"Epoch {epoch+1}/{num_epochs} [Train]",
+                             ncols=100,
+                             leave=True)
+            
+            for batch_idx, batch in train_pbar:
                 # Move to device
                 if isinstance(batch, dict):
                     batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v 
@@ -449,6 +457,13 @@ def train_consolidated(model, train_dataloader, val_dataloader, num_epochs=100,
                         epoch_losses[k] += v
                     
                     num_batches += 1
+                    
+                    # Update progress bar with current losses
+                    train_pbar.set_postfix({
+                        'World': f"{losses['world_loss']:.4f}",
+                        'Actor': f"{losses['actor_loss']:.4f}",
+                        'Critic': f"{losses['critic_loss']:.4f}"
+                    })
                     
                     # Log progress
                     if batch_idx % 50 == 0:
@@ -485,9 +500,17 @@ def train_consolidated(model, train_dataloader, val_dataloader, num_epochs=100,
             
             _logger.info(f"Epoch {epoch + 1}/{num_epochs} - Validation...")
             
+            # Add tqdm progress bar for validation
+            val_limit = min(10, len(val_dataloader))  # Only validate on first 10 batches for speed
+            val_pbar = tqdm(enumerate(val_dataloader),
+                           total=val_limit,
+                           desc=f"Epoch {epoch+1}/{num_epochs} [Val]",
+                           ncols=100,
+                           leave=True)
+            
             with torch.no_grad():
-                for batch_idx, batch in enumerate(val_dataloader):
-                    if batch_idx >= 10:  # Only validate on first 10 batches for speed
+                for batch_idx, batch in val_pbar:
+                    if batch_idx >= val_limit:
                         break
                     
                     # Move to device
@@ -514,6 +537,13 @@ def train_consolidated(model, train_dataloader, val_dataloader, num_epochs=100,
                         val_losses['kl_loss'] += model_output['losses']['kl_loss'].item()
                         
                         num_val_batches += 1
+                        
+                        # Update progress bar with validation losses
+                        val_pbar.set_postfix({
+                            'World': f"{model_output['losses']['total_loss'].item():.4f}",
+                            'Recon': f"{model_output['losses']['recon_loss'].item():.4f}",
+                            'KL': f"{model_output['losses']['kl_loss'].item():.4f}"
+                        })
                     
                     except Exception as e:
                         _logger.error(f"Error in validation: {e}")

@@ -212,10 +212,10 @@ data/
 logs/
 
 # MLflow
-mlruns/
-mlartifacts/
-checkpoints/
-plots/
-*.pt
-*.pth
-*.ckpt
+# mlruns/
+# mlartifacts/
+# checkpoints/
+# plots/
+# *.pt
+# *.pth
+# *.ckpt

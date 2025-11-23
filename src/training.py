@@ -4,12 +4,10 @@
 import torch
 import torch.nn.functional as F
 from torch.optim import Adam
-from torch.utils.data import DataLoader
 from torch.distributions import Normal
 import mlflow
 import mlflow.pytorch
 from pathlib import Path
-import json
 from datetime import datetime
 
 from src.models import DreamerModel
@@ -326,6 +324,240 @@ def train(model, dataset, num_epochs=100, batch_size=50, device='cuda',
                     'actor_optimizer_state_dict': trainer.actor_optimizer.state_dict(),
                     'critic_optimizer_state_dict': trainer.critic_optimizer.state_dict(),
                     'losses': epoch_losses,
+                }, checkpoint_path)
+                
+                _logger.info(f"Checkpoint saved: {checkpoint_path}")
+                
+                # Log checkpoint as artifact
+                mlflow.log_artifact(str(checkpoint_path))
+                
+                # Save best model
+                total_loss = epoch_losses['world_loss'] + epoch_losses['actor_loss'] + epoch_losses['critic_loss']
+                if total_loss < best_loss:
+                    best_loss = total_loss
+                    best_model_path = checkpoint_dir / "best_model.pt"
+                    torch.save(model.state_dict(), best_model_path)
+                    mlflow.log_artifact(str(best_model_path))
+                    _logger.info(f"New best model saved with loss: {best_loss:.4f}")
+        
+        # Save final model with MLflow
+        _logger.info("Saving final model to MLflow...")
+        mlflow.pytorch.log_model(model, "model")
+        
+        # Log model architecture
+        model_info = {
+            "architecture": "DreamerModel",
+            "total_parameters": sum(p.numel() for p in model.parameters()),
+            "trainable_parameters": sum(p.numel() for p in model.parameters() if p.requires_grad),
+        }
+        mlflow.log_dict(model_info, "model_info.json")
+        
+        _logger.info(f"Training complete! MLflow run ID: {mlflow.active_run().info.run_id}")
+
+
+def train_consolidated(model, train_dataloader, val_dataloader, num_epochs=100, 
+                       device='cuda', experiment_name="dreamer-spectrogram", 
+                       run_name=None, checkpoint_freq=10, learning_rate=1e-4):
+    """
+    Training function for consolidated dataset (HDF5 or PyTorch)
+    
+    Args:
+        model: DreamerModel instance
+        train_dataloader: Training DataLoader
+        val_dataloader: Validation DataLoader
+        num_epochs: Number of training epochs
+        device: Device to train on ('cuda' or 'cpu')
+        experiment_name: MLflow experiment name
+        run_name: MLflow run name (default: auto-generated)
+        checkpoint_freq: Save checkpoint every N epochs
+        learning_rate: Learning rate for optimizers
+    """
+    # Setup MLflow
+    mlflow.set_experiment(experiment_name)
+    
+    if run_name is None:
+        run_name = f"dreamer_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    
+    with mlflow.start_run(run_name=run_name):
+        # Log hyperparameters
+        mlflow.log_params({
+            "h_state_size": model.h_state_size,
+            "z_state_size": model.z_state_size,
+            "action_size": model.action_size,
+            "num_epochs": num_epochs,
+            "device": device,
+            "train_batches": len(train_dataloader),
+            "val_batches": len(val_dataloader),
+            "learning_rate": learning_rate,
+        })
+        
+        model = model.to(device)
+        trainer = DreamerTrainer(model, learning_rate=learning_rate)
+        
+        # Log trainer hyperparameters
+        mlflow.log_params({
+            "imagination_horizon": trainer.imagination_horizon,
+            "gamma": trainer.gamma,
+            "lambda": trainer.lambda_,
+        })
+        
+        # Create checkpoint directory
+        checkpoint_dir = Path("checkpoints") / run_name
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        
+        best_loss = float('inf')
+        
+        _logger.info(f"Starting training for {num_epochs} epochs...")
+        _logger.info(f"Train batches: {len(train_dataloader)}, Val batches: {len(val_dataloader)}")
+        
+        for epoch in range(num_epochs):
+            # Training phase
+            model.train()
+            epoch_losses = {
+                'world_loss': 0,
+                'recon_loss': 0,
+                'kl_loss': 0,
+                'aux_loss': 0,
+                'actor_loss': 0,
+                'critic_loss': 0
+            }
+            
+            num_batches = 0
+            
+            _logger.info(f"Epoch {epoch + 1}/{num_epochs} - Training...")
+            
+            for batch_idx, batch in enumerate(train_dataloader):
+                # Move to device
+                if isinstance(batch, dict):
+                    batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v 
+                            for k, v in batch.items()}
+                else:
+                    # Tuple format: (observations, actions, metadata)
+                    obs, actions, meta = batch
+                    batch = {
+                        'observation': obs.to(device),
+                        'action': actions.to(device),
+                        'rewards': torch.zeros(obs.shape[0], obs.shape[1], device=device)
+                    }
+                
+                # Training step
+                try:
+                    losses = trainer.train_step(batch)
+                    
+                    # Accumulate losses
+                    for k, v in losses.items():
+                        epoch_losses[k] += v
+                    
+                    num_batches += 1
+                    
+                    # Log progress
+                    if batch_idx % 50 == 0:
+                        _logger.info(f"  Batch {batch_idx}/{len(train_dataloader)}: "
+                                   f"World={losses['world_loss']:.4f}, "
+                                   f"Actor={losses['actor_loss']:.4f}, "
+                                   f"Critic={losses['critic_loss']:.4f}")
+                        
+                        # Log batch metrics to MLflow
+                        step = epoch * len(train_dataloader) + batch_idx
+                        mlflow.log_metrics({
+                            f"train_batch/{k}": v for k, v in losses.items()
+                        }, step=step)
+                
+                except Exception as e:
+                    _logger.error(f"Error in training step: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    continue
+            
+            # Average training losses
+            for k in epoch_losses:
+                epoch_losses[k] /= num_batches
+            
+            # Validation phase
+            model.eval()
+            val_losses = {
+                'world_loss': 0,
+                'recon_loss': 0,
+                'kl_loss': 0,
+            }
+            
+            num_val_batches = 0
+            
+            _logger.info(f"Epoch {epoch + 1}/{num_epochs} - Validation...")
+            
+            with torch.no_grad():
+                for batch_idx, batch in enumerate(val_dataloader):
+                    if batch_idx >= 10:  # Only validate on first 10 batches for speed
+                        break
+                    
+                    # Move to device
+                    if isinstance(batch, dict):
+                        batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v 
+                                for k, v in batch.items()}
+                    else:
+                        obs, actions, meta = batch
+                        batch = {
+                            'observation': obs.to(device),
+                            'action': actions.to(device),
+                            'rewards': torch.zeros(obs.shape[0], obs.shape[1], device=device)
+                        }
+                    
+                    try:
+                        # Forward pass only
+                        observations = batch['observation']
+                        actions = batch['action']
+                        
+                        model_output = model(observations, actions, compute_loss=True)
+                        
+                        val_losses['world_loss'] += model_output['losses']['total_loss'].item()
+                        val_losses['recon_loss'] += model_output['losses']['recon_loss'].item()
+                        val_losses['kl_loss'] += model_output['losses']['kl_loss'].item()
+                        
+                        num_val_batches += 1
+                    
+                    except Exception as e:
+                        _logger.error(f"Error in validation: {e}")
+                        continue
+            
+            # Average validation losses
+            for k in val_losses:
+                if num_val_batches > 0:
+                    val_losses[k] /= num_val_batches
+            
+            # Log epoch summary
+            _logger.info("=" * 80)
+            _logger.info(f"Epoch {epoch + 1}/{num_epochs} Summary:")
+            _logger.info(f"  Train World Loss: {epoch_losses['world_loss']:.4f}")
+            _logger.info(f"  Train Recon Loss: {epoch_losses['recon_loss']:.4f}")
+            _logger.info(f"  Train KL Loss: {epoch_losses['kl_loss']:.4f}")
+            _logger.info(f"  Train Actor Loss: {epoch_losses['actor_loss']:.4f}")
+            _logger.info(f"  Train Critic Loss: {epoch_losses['critic_loss']:.4f}")
+            if num_val_batches > 0:
+                _logger.info(f"  Val World Loss: {val_losses['world_loss']:.4f}")
+                _logger.info(f"  Val Recon Loss: {val_losses['recon_loss']:.4f}")
+            _logger.info("=" * 80)
+            
+            # Log epoch metrics to MLflow
+            mlflow.log_metrics({
+                f"train_epoch/{k}": v for k, v in epoch_losses.items()
+            }, step=epoch)
+            
+            if num_val_batches > 0:
+                mlflow.log_metrics({
+                    f"val_epoch/{k}": v for k, v in val_losses.items()
+                }, step=epoch)
+            
+            # Save checkpoint
+            if (epoch + 1) % checkpoint_freq == 0 or epoch == num_epochs - 1:
+                checkpoint_path = checkpoint_dir / f"checkpoint_epoch_{epoch+1}.pt"
+                torch.save({
+                    'epoch': epoch,
+                    'model_state_dict': model.state_dict(),
+                    'world_optimizer_state_dict': trainer.world_optimizer.state_dict(),
+                    'actor_optimizer_state_dict': trainer.actor_optimizer.state_dict(),
+                    'critic_optimizer_state_dict': trainer.critic_optimizer.state_dict(),
+                    'train_losses': epoch_losses,
+                    'val_losses': val_losses,
                 }, checkpoint_path)
                 
                 _logger.info(f"Checkpoint saved: {checkpoint_path}")

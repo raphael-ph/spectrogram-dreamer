@@ -1,7 +1,7 @@
 import torch
 import argparse
+import os
 from pathlib import Path
-from src.preprocessing.launch import launch
 from src.dataset.spectrogram_dataset import SpectrogramDataset
 from src.models import DreamerModel
 from src.training import train
@@ -32,7 +32,7 @@ def main():
     # Training parameters
     parser.add_argument("--epochs", type=int, default=100,
                         help="Number of training epochs")
-    parser.add_argument("--batch-size", type=int, default=50,
+    parser.add_argument("--batch-size", type=int, default=32,
                         help="Batch size")
     parser.add_argument("--sequence-length", type=int, default=10,
                         help="Sequence length for temporal modeling")
@@ -40,6 +40,10 @@ def main():
                         help="Validation split ratio")
     parser.add_argument("--checkpoint-freq", type=int, default=10,
                         help="Save checkpoint every N epochs")
+    parser.add_argument("--lr", type=float, default=1e-4,
+                        help="Learning rate")
+    parser.add_argument("--num-workers", type=int, default=4,
+                        help="Number of dataloader workers")
     
     # MLflow parameters
     parser.add_argument("--experiment-name", type=str, default="dreamer-spectrogram",
@@ -67,12 +71,22 @@ def main():
     _logger.info(f"Using device: {device}")
     _logger.info(f"MLflow tracking: mlruns/{args.experiment_name}")
     
+    # Auto-detect action size from dataset if using consolidated
+    actual_action_size = args.action_size
+    if args.use_consolidated and os.path.exists(args.dataset_path):
+        _logger.info("Detecting action size from HDF5 dataset...")
+        import h5py
+        with h5py.File(args.dataset_path, 'r') as f:
+            if 'styles' in f:
+                actual_action_size = f['styles'].shape[-1]
+                _logger.info(f"Detected action size: {actual_action_size}")
+    
     # Initialize model
     _logger.info("Initializing Dreamer model...")
     model = DreamerModel(
         h_state_size=args.h_state_size,
         z_state_size=args.z_state_size,
-        action_size=args.action_size,
+        action_size=actual_action_size,
         embedding_size=256,
         aux_size=5,  # pitch, energy, delta-energy, spectral centroid, onset strength
         in_channels=1,
@@ -89,14 +103,14 @@ def main():
                 is_hdf5 = dataset_path.suffix == '.h5'
                 
                 if is_hdf5:
-                    _logger.info("✅ Using HDF5 CONSOLIDATED dataset")
-                    _logger.info(f"📂 Loading from: {args.dataset_path}")
+                    _logger.info("Using HDF5 CONSOLIDATED dataset")
+                    _logger.info(f"Loading from: {args.dataset_path}")
                     
                     from src.dataset import create_hdf5_dataloaders, get_hdf5_dataset_info
                     
                     # Get dataset info
                     info = get_hdf5_dataset_info(args.dataset_path)
-                    _logger.info(f"📊 Dataset info:")
+                    _logger.info(f"Dataset info:")
                     _logger.info(f"   - Format: {info['format']}")
                     _logger.info(f"   - Total samples: {info['num_samples']}")
                     _logger.info(f"   - Unique files: {info['num_unique_files']}")
@@ -109,18 +123,18 @@ def main():
                         dataset_path=args.dataset_path,
                         val_split=args.val_split,
                         batch_size=args.batch_size,
-                        num_workers=4,
+                        num_workers=args.num_workers,
                         pin_memory=(device == "cuda")
                     )
                 else:
-                    _logger.info("✅ Using PyTorch CONSOLIDATED dataset")
-                    _logger.info(f"📂 Loading from: {args.dataset_path}")
+                    _logger.info("Using PyTorch CONSOLIDATED dataset")
+                    _logger.info(f"Loading from: {args.dataset_path}")
                     
                     from src.dataset import create_train_val_dataloaders, get_dataset_info
                     
                     # Get dataset info
                     info = get_dataset_info(args.dataset_path)
-                    _logger.info(f"📊 Dataset info:")
+                    _logger.info(f"Dataset info:")
                     _logger.info(f"   - Total samples: {info['num_samples']}")
                     _logger.info(f"   - Unique files: {info['num_unique_files']}")
                     _logger.info(f"   - File size: {info['file_size_mb']:.2f} MB")
@@ -131,7 +145,7 @@ def main():
                         val_split=args.val_split,
                         batch_size=args.batch_size,
                         sequence_length=args.sequence_length,
-                        num_workers=4,
+                        num_workers=args.num_workers,
                         pin_memory=(device == "cuda")
                     )
                 
@@ -139,12 +153,28 @@ def main():
                 _logger.info(f"   - Train batches: {len(train_dataloader)}")
                 _logger.info(f"   - Val batches: {len(val_dataloader)}")
                 
-                # TODO: Integrate with training loop
-                _logger.info("Training loop integration pending - see docs/CONSOLIDATED_DATASET.md")
-                _logger.info("You can start using the dataloaders now:")
-                _logger.info("   for spectrograms, styles, meta in train_dataloader:")
-                _logger.info("       # spectrograms: [batch, seq_len, n_mels, time_frames]")
-                _logger.info("       # Train model...")
+                # Start training
+                _logger.info("Starting training with MLflow tracking...")
+                
+                from src.training import train_consolidated
+                
+                train_consolidated(
+                    model=model,
+                    train_dataloader=train_dataloader,
+                    val_dataloader=val_dataloader,
+                    num_epochs=args.epochs,
+                    device=device,
+                    experiment_name=args.experiment_name,
+                    run_name=args.run_name,
+                    checkpoint_freq=args.checkpoint_freq,
+                    learning_rate=args.lr
+                )
+                
+                _logger.info("\n")
+                _logger.info("Training complete!")
+                _logger.info("Check mlruns/ directory for results")
+                _logger.info("Run 'mlflow ui' to visualize training")
+                _logger.info("\n")
                 
             else:
                 # Original dataset mode (deprecated)

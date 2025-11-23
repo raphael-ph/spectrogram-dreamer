@@ -59,28 +59,30 @@ class ConvEncoder(nn.Module):
     """Implementation of a convolutional encoder
     
     The Convolutional Encoder follows the original implementation and takes inspiration
-    from `Pydreamer`.
+    from `Pydreamer`. Modified to handle spectrograms with small width (10 frames).
     """
     def __init__(self, in_channels: int = 1, # single audio channel
                  cnn_depth: int = 32
                  ):
         super().__init__()
-        self.out_dim = cnn_depth * 8 * 4 * 3  # Updated for padded convolutions (4x3 spatial output)
-        kernels = (4, 4, 4, 4)
-        stride = 2
-        padding = 1  # Add padding to handle smaller inputs
+        # Use asymmetric kernels: larger for height (mel-bins), smaller for width (time)
+        # This handles spectrograms with shape (64, 10) better
+        # Using 3 layers instead of 4 to avoid width collapsing too fast
         d = cnn_depth
         self.model = nn.Sequential(
-            nn.Conv2d(in_channels, d, kernels[0], stride, padding),
-            nn.ELU(), # paper specifies ELU as the activation function
-            nn.Conv2d(d, d * 2, kernels[1], stride, padding),
+            # Layer 1: (64, 10) -> (32, 5) with kernel (4,3), stride 2, padding (1,1)
+            nn.Conv2d(in_channels, d * 2, kernel_size=(4, 3), stride=2, padding=(1, 1)),
             nn.ELU(),
-            nn.Conv2d(d * 2, d * 4, kernels[2], stride, padding),
+            # Layer 2: (32, 5) -> (16, 3) with kernel (4,3), stride 2, padding (1,1)
+            nn.Conv2d(d * 2, d * 4, kernel_size=(4, 3), stride=2, padding=(1, 1)),
             nn.ELU(),
-            nn.Conv2d(d * 4, d * 8, kernels[3], stride, padding),
+            # Layer 3: (16, 3) -> (8, 2) with kernel (4,3), stride 2, padding (1,1)
+            nn.Conv2d(d * 4, d * 8, kernel_size=(4, 3), stride=2, padding=(1, 1)),
             nn.ELU(),
             nn.Flatten()
         )
+        # Output dimension: d * 8 * 8 * 2 = d * 128
+        self.out_dim = d * 8 * 8 * 2
 
     def forward(self, x):
         _logger.debug(f"x shape before flattening: {x.shape}") # expecting here (B, T, C, n_mels, L)

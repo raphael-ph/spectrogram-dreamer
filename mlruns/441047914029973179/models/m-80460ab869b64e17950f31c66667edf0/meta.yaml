@@ -1,0 +1,10 @@
+artifact_location: file:///home/henriquesouza/spectrogram-dreamer/mlruns/441047914029973179/models/m-80460ab869b64e17950f31c66667edf0/artifacts
+creation_timestamp: 1763927763352
+experiment_id: '441047914029973179'
+last_updated_timestamp: 1763927765386
+model_id: m-80460ab869b64e17950f31c66667edf0
+model_type: null
+name: model
+source_run_id: 006a75d95d1046658c00a52d9ccb2ef3
+status: 2
+status_message: null

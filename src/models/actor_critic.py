@@ -8,7 +8,7 @@ from torch.distributions import Normal
 from ..utils.logger import get_logger
 from ..utils.functions import flatten_batch, unflatten_batch
 
-_logger = get_logger("actor_critic", level="DEBUG")
+_logger = get_logger("actor_critic", level="INFO")
 
 
 class Actor(nn.Module):

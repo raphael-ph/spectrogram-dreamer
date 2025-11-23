@@ -10,7 +10,7 @@ from ..utils.logger import get_logger
 from ..utils.functions import flatten_batch, unflatten_batch
 
 # set up logging
-_logger = get_logger("encoder", level="DEBUG")
+_logger = get_logger("encoder", level="INFO")
 
 class Encoder(nn.Module):
     """Dreamer full encoder implementation, contemplating both the Convolutional Network and the

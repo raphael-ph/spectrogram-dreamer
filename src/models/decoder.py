@@ -7,7 +7,7 @@ import torch.nn as nn
 from ..utils.logger import get_logger
 from ..utils.functions import flatten_batch, unflatten_batch
 
-_logger = get_logger("decoder", level="DEBUG")
+_logger = get_logger("decoder", level="INFO")
 
 
 class Decoder(nn.Module):

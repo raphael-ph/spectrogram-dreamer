@@ -13,7 +13,7 @@ from torch.utils.data import Dataset
 from ..utils.logger import get_logger
 
 # set up logging
-_logger = get_logger("dataset", level="DEBUG")
+_logger = get_logger("dataset", level="INFO")
 
 class SpectrogramDataset(Dataset):
     """Generates the spectogram dataset

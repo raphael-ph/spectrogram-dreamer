@@ -1,5 +1,5 @@
 artifact_uri: file:///home/henriquesouza/spectrogram-dreamer/mlruns/789017296987570404/0d2a4e3ed58a4a3da945cc9cb861c675/artifacts
-end_time: null
+end_time: 1764019487491
 entry_point_name: ''
 experiment_id: '789017296987570404'
 lifecycle_stage: active
@@ -9,6 +9,6 @@ source_name: ''
 source_type: 4
 source_version: ''
 start_time: 1763973079627
-status: 1
+status: 3
 tags: []
 user_id: henriquesouza

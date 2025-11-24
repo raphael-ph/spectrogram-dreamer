@@ -7,7 +7,7 @@ import torch.nn as nn
 from ..utils.logger import get_logger
 from ..utils.functions import flatten_batch, unflatten_batch
 
-_logger = get_logger("decoder", level="DEBUG")
+_logger = get_logger("decoder", level="INFO")
 
 
 class Decoder(nn.Module):
@@ -27,24 +27,32 @@ class Decoder(nn.Module):
                  cnn_depth: int = 32):
         super().__init__()
         
+        self.cnn_depth = cnn_depth
+        d = cnn_depth
+        
         # MLP to expand latent state
+        # Initial spatial dimensions after encoder: (8, 2) for input (64, 10)
+        # This must match the encoder's output spatial dimensions
         latent_size = h_state_size + z_state_size
+        mlp_output_size = d * 8 * 8 * 2  # (d * 8 channels, 8 height, 2 width)
+        self.initial_shape = (d * 8, 8, 2)
+        
         self.mlp = nn.Sequential(
             nn.Linear(latent_size, 200),
             nn.ELU(),
-            nn.Linear(200, 512)  # Output will be reshaped to (B, 32*8, 2, 1)
+            nn.Linear(200, mlp_output_size)
         )
         
-        # Transposed convolutions to upsample
-        d = cnn_depth
+        # Transposed convolutions to upsample: (8, 2) → (64, 10)
+        # Layer 1: (8, 2) → (16, 3) with kernel (4,3), stride 2, padding (1,1)
+        # Layer 2: (16, 3) → (32, 5) with kernel (4,3), stride 2, padding (1,1)
+        # Layer 3: (32, 5) → (64, 10) with kernel (4,3), stride 2, padding (1,1), output_padding (0,1)
         self.deconv = nn.Sequential(
-            nn.ConvTranspose2d(d * 8, d * 4, kernel_size=4, stride=2),
+            nn.ConvTranspose2d(d * 8, d * 4, kernel_size=(4, 3), stride=2, padding=(1, 1)),
             nn.ELU(),
-            nn.ConvTranspose2d(d * 4, d * 2, kernel_size=4, stride=2),
+            nn.ConvTranspose2d(d * 4, d * 2, kernel_size=(4, 3), stride=2, padding=(1, 1)),
             nn.ELU(),
-            nn.ConvTranspose2d(d * 2, d, kernel_size=4, stride=2),
-            nn.ELU(),
-            nn.ConvTranspose2d(d, out_channels, kernel_size=4, stride=2),
+            nn.ConvTranspose2d(d * 2, out_channels, kernel_size=(4, 3), stride=2, padding=(1, 1), output_padding=(0, 1)),
         )
         
     def forward(self, h_state, z_state):
@@ -71,8 +79,8 @@ class Decoder(nn.Module):
         x = self.mlp(latent)
         _logger.debug(f"After MLP: {x.shape}")
         
-        # Reshape to feature map
-        x = x.view(-1, 256, 2, 1)  # (B*T, 256, 2, 1)
+        # Reshape to feature map (d * 8 channels, 4x1 spatial)
+        x = x.view(-1, *self.initial_shape)
         _logger.debug(f"Reshaped: {x.shape}")
         
         # Deconvolution

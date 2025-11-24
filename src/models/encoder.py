@@ -10,7 +10,7 @@ from ..utils.logger import get_logger
 from ..utils.functions import flatten_batch, unflatten_batch
 
 # set up logging
-_logger = get_logger("encoder", level="DEBUG")
+_logger = get_logger("encoder", level="INFO")
 
 class Encoder(nn.Module):
     """Dreamer full encoder implementation, contemplating both the Convolutional Network and the
@@ -59,33 +59,36 @@ class ConvEncoder(nn.Module):
     """Implementation of a convolutional encoder
     
     The Convolutional Encoder follows the original implementation and takes inspiration
-    from `Pydreamer`.
+    from `Pydreamer`. Modified to handle spectrograms with small width (10 frames).
     """
     def __init__(self, in_channels: int = 1, # single audio channel
                  cnn_depth: int = 32
                  ):
         super().__init__()
-        self.out_dim = cnn_depth * 8 * 2 * 1
-        kernels = (4, 4, 4, 4)
-        stride = 2
+        # Use asymmetric kernels: larger for height (mel-bins), smaller for width (time)
+        # This handles spectrograms with shape (64, 10) better
+        # Using 3 layers instead of 4 to avoid width collapsing too fast
         d = cnn_depth
         self.model = nn.Sequential(
-            nn.Conv2d(in_channels, d, kernels[0], stride),
-            nn.ELU(), # paper specifies ELU as the activation function
-            nn.Conv2d(d, d * 2, kernels[1], stride),
+            # Layer 1: (64, 10) -> (32, 5) with kernel (4,3), stride 2, padding (1,1)
+            nn.Conv2d(in_channels, d * 2, kernel_size=(4, 3), stride=2, padding=(1, 1)),
             nn.ELU(),
-            nn.Conv2d(d * 2, d * 4, kernels[2], stride),
+            # Layer 2: (32, 5) -> (16, 3) with kernel (4,3), stride 2, padding (1,1)
+            nn.Conv2d(d * 2, d * 4, kernel_size=(4, 3), stride=2, padding=(1, 1)),
             nn.ELU(),
-            nn.Conv2d(d * 4, d * 8, kernels[3], stride),
+            # Layer 3: (16, 3) -> (8, 2) with kernel (4,3), stride 2, padding (1,1)
+            nn.Conv2d(d * 4, d * 8, kernel_size=(4, 3), stride=2, padding=(1, 1)),
             nn.ELU(),
             nn.Flatten()
         )
+        # Output dimension: d * 8 * 8 * 2 = d * 128
+        self.out_dim = d * 8 * 8 * 2
 
     def forward(self, x):
         _logger.debug(f"x shape before flattening: {x.shape}") # expecting here (B, T, C, n_mels, L)
         
-        x, batch_dim = flatten_batch(x, 2)
-        _logger.debug(f"x shape after flattened: {x.shape}") # expecting here (B, X)
+        x, batch_dim = flatten_batch(x, 3)  # Keep last 3 dims (C, H, W) for CNN
+        _logger.debug(f"x shape after flattened: {x.shape}") # expecting here (B*T, C, H, W)
 
         y = self.model(x)
         _logger.debug(f"y shape flattened: {y.shape}")

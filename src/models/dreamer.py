@@ -12,7 +12,7 @@ from .actor_critic import Actor, Critic
 from .predictors import RewardPredictor, StyleRewardPredictor, AuxiliaryPredictor
 from ..utils.logger import get_logger
 
-_logger = get_logger("dreamer_model", level="DEBUG")
+_logger = get_logger("dreamer_model", level="INFO")
 
 
 class DreamerModel(nn.Module):

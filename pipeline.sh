@@ -1,0 +1,57 @@
+#!/bin/bash
+
+set -e
+
+# Configuration
+INPUT_DIR="data/1_validated-audio"
+OUTPUT_FILE="data/dataset_consolidated.h5"
+METADATA_FILE="data/data-file/validated.tsv"
+BATCH_SIZE=128
+EPOCHS=100
+LEARNING_RATE=1e-4
+
+# Spectrogram parameters
+N_FFT=512
+WIN_LENGTH=20
+HOP_LENGTH=10
+N_MELS=64
+F_MIN=50
+F_MAX=7600
+SEGMENT_DURATION=0.1
+OVERLAP=0.5
+
+# Step 1: Create consolidated dataset with Log-Mel spectrograms
+python -m src.preprocessing.create_consolidated_dataset \
+    --input-dir "$INPUT_DIR" \
+    --output-file "$OUTPUT_FILE" \
+    --metadata-file "$METADATA_FILE" \
+    --n-fft $N_FFT \
+    --win-length $WIN_LENGTH \
+    --hop-length $HOP_LENGTH \
+    --n-mels $N_MELS \
+    --f-min $F_MIN \
+    --f-max $F_MAX \
+    --segment-duration $SEGMENT_DURATION \
+    --overlap $OVERLAP
+
+# Step 2: Train model
+python main.py \
+    --batch-size $BATCH_SIZE \
+    --epochs $EPOCHS \
+    --learning-rate $LEARNING_RATE \
+    --dataset "$OUTPUT_FILE"
+
+# Step 3: Test inference with best model
+if [ -d "checkpoints" ]; then
+    LATEST_CHECKPOINT=$(find checkpoints -name "best_model.pt" -type f -printf '%T@ %p\n' | sort -n | tail -1 | cut -f2- -d" ")
+    if [ -n "$LATEST_CHECKPOINT" ]; then
+        TEST_AUDIO=$(find "$INPUT_DIR" -type f \( -name "*.mp3" -o -name "*.wav" \) | head -1)
+        if [ -n "$TEST_AUDIO" ]; then
+            python infer.py \
+                --model "$LATEST_CHECKPOINT" \
+                --input "$TEST_AUDIO" \
+                --mode recon \
+                --use_log
+        fi
+    fi
+fi

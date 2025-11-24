@@ -47,16 +47,32 @@ GLOBAL_STD = np.array([
 
 
 # ==========================================
-# 1. AUDIO PROCESSOR (POWER MODE DEFAULT)
+# 1. AUDIO PROCESSOR (LOG-MEL MODE - MANDATORY FOR QUALITY)
 # ==========================================
 class AudioProcessor:
-    def __init__(self, use_log=False, sample_rate=16000, n_fft=1024, win_length=20, hop_length=10, 
+    def __init__(self, use_log=True, sample_rate=16000, n_fft=1024, win_length=20, hop_length=10, 
                  n_mels=64, f_min=50, f_max=7600, segment_duration=0.1, overlap=0.5):
+        """
+        Audio processor for inference.
         
+        CRITICAL: use_log MUST be True for proper audio quality.
+        Training data uses Log-Mel spectrograms. If you use Power spectrograms
+        here (use_log=False), you will get:
+        - Metallic noise artifacts
+        - Loss of speech detail/intelligibility
+        - Hissing/static background noise
+        
+        Args:
+            use_log: Use Log-Mel spectrograms (DEFAULT: True, REQUIRED for quality)
+        """
         self.sr = sample_rate
         self.n_fft = n_fft 
         self.n_mels = n_mels
-        self.use_log = use_log 
+        self.use_log = use_log
+        
+        if not use_log:
+            logger.warning("WARNING: use_log=False will produce terrible audio quality!")
+            logger.warning("         Training uses Log-Mel. Inference should too.") 
         
         self.hop_len = int(sample_rate * (hop_length / 1000))
         self.win_len = int(sample_rate * (win_length / 1000))

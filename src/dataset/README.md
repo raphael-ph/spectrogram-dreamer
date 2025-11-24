@@ -1,11 +1,15 @@
 # Dataset module
 
-This module contains utilities to work with the project's spectrogram dataset. It provides a small, focused helper to create PyTorch `DataLoader`s for datasets that are already loaded or cached in memory.
+This module contains utilities to work with the project's **Log-Mel spectrogram** dataset. It provides a small, focused helper to create PyTorch `DataLoader`s for datasets that are already loaded or cached in memory.
+
+## Important Note: Log-Mel Spectrograms Only
+
+All spectrograms in this project are **Log-Mel spectrograms** (natural log of power), NOT Power spectrograms. This is essential for audio quality. See [LOG_MEL_IMPLEMENTATION.md](../../LOG_MEL_IMPLEMENTATION.md) for details.
 
 The dataset code in `src/dataset` expects the project's data layout (rooted at the repository `data/` directory):
 
 - `data/1_validated-audio/` — original validated audio and metadata (e.g. `validated_metadata.tsv`).
-- `data/2_mel-spectrograms/` — per-clip precomputed mel-spectrograms organized by speaker or split.
+- `data/2_mel-spectrograms/` — per-clip precomputed **Log-Mel** spectrograms organized by speaker or split.
 - `data/3_style-vectors/` — optional style / embedding vectors per clip.
 
 Purpose

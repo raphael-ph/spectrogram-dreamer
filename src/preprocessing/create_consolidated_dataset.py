@@ -102,6 +102,7 @@ def create_consolidated_dataset(
     for audio_path in tqdm(audio_files, desc="Processing audio files"):
         try:
             # Criar objeto AudioFile com parâmetros especificados
+            # IMPORTANTE: AudioFile.segment_spectrogram() retorna Log-Mel spectrograms
             audio = AudioFile(
                 str(audio_path),
                 segment_duration=segment_duration,
@@ -114,7 +115,7 @@ def create_consolidated_dataset(
                 f_max=f_max
             )
             
-            # Gerar segmentos de espectrograma
+            # Gerar segmentos de espectrograma (Log-Mel, não Power)
             segments = audio.segment_spectrogram()
             
             if len(segments) == 0:

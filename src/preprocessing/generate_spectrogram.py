@@ -1,4 +1,22 @@
-"""Generating MEL spectogram using torchaudio"""
+"""
+Generating LOG-MEL Spectrograms for Dreamer Training
+
+CRITICAL CHANGE: This module generates LOG-MEL spectrograms, NOT Power spectrograms.
+
+Why Log-Mel is Essential:
+--------------------------
+Deep learning models with MSE loss struggle with Power spectrograms due to massive
+dynamic range (0.001 to 1000.0 = 1,000,000x difference). This causes:
+  
+  1. Model ignores quiet sounds (speech texture, consonants)
+  2. Only learns loud peaks (volume spikes, rhythm)  
+  3. Generates metallic noise and hiss
+  
+Log-Mel compresses the range (e.g., -10 to +10 = 20 units), forcing the model
+to learn both quiet and loud features equally, matching human hearing perception.
+
+Do NOT switch back to Power spectrograms without understanding these consequences.
+"""
 
 # torch imports
 import torch
@@ -71,8 +89,26 @@ class AudioFile:
         self.step = max(1, int(self.L * (1 - overlap)))
         self.overlap = overlap
         
-        # Pre-calculate the mel transform
-        # NOTE: This outputs POWER spectrogram (Magnitude^2) by default
+        # ============================================================================
+        # PRE-CALCULATE MEL TRANSFORM (ALWAYS OUTPUTS LOG-MEL)
+        # ============================================================================
+        # CRITICAL: We use power=2.0 to get Power spectrogram first, then apply
+        # log transformation to get Log-Mel. This avoids the massive dynamic range
+        # problem that causes the model to ignore quiet sounds and produce metallic
+        # noise artifacts.
+        #
+        # Power Domain Problem:
+        #   - Quiet sound: 0.001
+        #   - Loud sound: 1000.0
+        #   - Range: 1,000,000x difference
+        #   - Model ignores fine details (speech texture) and only learns volume spikes
+        #
+        # Log-Mel Solution:
+        #   - Quiet sound: -7.0 (log scale)
+        #   - Loud sound: +7.0 (log scale)  
+        #   - Range: ~14 units (compressed, balanced)
+        #   - Model learns both quiet and loud features equally
+        # ============================================================================
         self._mel_transform = T.MelSpectrogram(
             sample_rate=self.sample_rate,
             n_fft=self.n_fft,
@@ -82,35 +118,49 @@ class AudioFile:
             f_max = self.f_max,
             center=True,
             pad_mode="reflect",
-            power=2.0,
+            power=2.0,  # Power spectrogram (will be log-transformed)
             norm="slaney",
             n_mels=self.n_mels,
             mel_scale="htk",
-        ).to(self.waveform.device) # Move transform to device
+        ).to(self.waveform.device)
     
     @property
     def mel_spectrogram(self):
         """
-        Returns the LOG-Mel Spectrogram.
-        CRITICAL FIX: Converting Power -> Log here.
-        This ensures the model trains on Log-Magnitude data (approx dB).
-        """
-        # 1. Get Power Spectrogram
-        mel_spec = self._mel_transform(self.waveform)
+        Returns the LOG-Mel Spectrogram (NOT Power spectrogram).
         
-        # 2. Apply Log (Natural Log) with clamping to avoid log(0)
-        # This compresses the dynamic range from [0, 10000] to [-11.5, 9.2]
-        return torch.log(torch.clamp(mel_spec, min=1e-5))
+        This is CRITICAL for audio quality:
+        - Compresses dynamic range from ~1,000,000x to ~10-20x
+        - Forces model to learn quiet details (speech texture) not just volume spikes
+        - Prevents metallic noise floor artifacts in generated audio
+        - Matches human hearing perception (logarithmic sensitivity)
+        
+        Returns:
+            Log-Mel spectrogram with values typically in range [-10, 10]
+            (Natural log of power spectrogram)
+        """
+        # 1. Get Power Spectrogram (Magnitude^2)
+        mel_power = self._mel_transform(self.waveform)
+        
+        # 2. Apply Natural Log with epsilon to avoid log(0)
+        # min=1e-5 corresponds to ~-11.5 in log space (silence floor)
+        mel_log = torch.log(torch.clamp(mel_power, min=1e-5))
+        
+        return mel_log
     
     def view_spectrogram(self, title=None, ylabel="Mel bins", ax=None, save_path=None):
-        """Display and optionally save a Mel spectrogram."""
-        # This is now already in Log Scale (Natural Log)
-        mel = self.mel_spectrogram 
+        """Display and optionally save a Log-Mel spectrogram.
         
-        # Since we are already in Log, we don't use AmplitudeToDB (which takes Log again).
-        # We just normalize min-max for visualization.
-        mel_vis = mel.squeeze(0).detach().cpu().numpy() 
+        NOTE: The spectrogram is already in Log scale (natural log of power).
+        We normalize for visualization only, not for training.
+        """
+        # Get Log-Mel spectrogram
+        mel_log = self.mel_spectrogram 
+        
+        # Convert to numpy for plotting
+        mel_vis = mel_log.squeeze(0).detach().cpu().numpy() 
 
+        # Min-max normalization for visualization only
         mel_vis -= mel_vis.min()
         mel_vis /= mel_vis.max() + 1e-8
 
@@ -122,22 +172,24 @@ class AudioFile:
             path = Path(save_path).with_suffix(".png")
             path.parent.mkdir(parents=True, exist_ok=True)
             plt.savefig(path, bbox_inches="tight", pad_inches=0)
-            _logger.info(f"Saved spectrogram: {path}")
+            _logger.info(f"Saved Log-Mel spectrogram: {path}")
         
-    def segment_spectrogram(self) -> List[torch.Tensor]: # Return type hint
-        """Segments spectrograms to feed them to dreamer
+    def segment_spectrogram(self) -> List[torch.Tensor]:
+        """Segments Log-Mel spectrograms to feed to the Dreamer model.
         
-        Returns: a list of segmented spectrograms [n_mels, L]
+        Returns:
+            List of Log-Mel spectrogram segments, each with shape [n_mels, L]
+            where values are in natural log space (typically [-10, 10] range)
         """
-        # This will now fetch the LOG-Mel spectrogram
-        mel = self.mel_spectrogram
+        # Get Log-Mel spectrogram (already in log space)
+        mel_log = self.mel_spectrogram
         
-        if mel.dim() == 3 and mel.shape[0] == 1:
-            mel_2d = mel.squeeze(0)
-        elif mel.dim() == 2:
-            mel_2d = mel
+        if mel_log.dim() == 3 and mel_log.shape[0] == 1:
+            mel_2d = mel_log.squeeze(0)
+        elif mel_log.dim() == 2:
+            mel_2d = mel_log
         else:
-            mel_2d = mel.reshape(mel.shape[-2], mel.shape[-1])
+            mel_2d = mel_log.reshape(mel_log.shape[-2], mel_log.shape[-1])
 
         step = max(1, int(self.L * (1 - self.overlap)))
         segments = []

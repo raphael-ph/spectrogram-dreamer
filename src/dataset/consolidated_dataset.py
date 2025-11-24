@@ -102,6 +102,13 @@ class ConsolidatedSpectrogramDataset(Dataset):
         return spectrograms, style_vector, metadata
     
     def _normalize(self, spectrogram: torch.Tensor) -> torch.Tensor:
+        """
+        Normalize Log-Mel spectrograms using per-mel-band statistics.
+        
+        Note: Statistics are computed from Log-Mel data during dataset creation.
+        This standardizes each mel band to ~zero mean and unit variance, which
+        helps training convergence.
+        """
         mean = self.stats['mean'].unsqueeze(1)
         std = self.stats['std'].unsqueeze(1)
         return (spectrogram - mean) / (std + 1e-6)

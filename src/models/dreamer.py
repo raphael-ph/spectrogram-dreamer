@@ -192,8 +192,8 @@ class DreamerModel(nn.Module):
         Compute all losses for the world model
         
         Args:
-            observations: Ground truth spectrograms
-            reconstructed: Reconstructed spectrograms
+            observations: Ground truth Log-Mel spectrograms (in log space)
+            reconstructed: Reconstructed Log-Mel spectrograms
             prior_means, prior_stds: Prior distribution parameters
             posterior_means, posterior_stds: Posterior distribution parameters
             predicted_aux: Predicted auxiliary features
@@ -201,8 +201,15 @@ class DreamerModel(nn.Module):
             
         Returns:
             Dictionary of losses
+            
+        Note:
+            MSE loss is appropriate for Log-Mel spectrograms because the log
+            transformation compresses the dynamic range, making all frequency
+            content equally important to the loss function. This prevents the
+            model from ignoring quiet sounds (speech texture) and focusing only
+            on loud peaks (volume spikes).
         """
-        # Reconstruction loss
+        # Reconstruction loss (MSE on Log-Mel spectrograms)
         recon_loss = F.mse_loss(reconstructed, observations)
         
         # KL divergence loss

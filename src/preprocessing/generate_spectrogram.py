@@ -24,7 +24,6 @@ from ..utils.logger import get_logger
 _logger = get_logger("spectrogram")
 
 
-
 class AudioFile:
     def __init__(self, waveform_path: str, 
                  n_fft: int = 1024, # n_fft (>= win_length)
@@ -73,6 +72,7 @@ class AudioFile:
         self.overlap = overlap
         
         # Pre-calculate the mel transform
+        # NOTE: This outputs POWER spectrogram (Magnitude^2) by default
         self._mel_transform = T.MelSpectrogram(
             sample_rate=self.sample_rate,
             n_fft=self.n_fft,
@@ -88,19 +88,35 @@ class AudioFile:
             mel_scale="htk",
         ).to(self.waveform.device) # Move transform to device
     
+    @property
+    def mel_spectrogram(self):
+        """
+        Returns the LOG-Mel Spectrogram.
+        CRITICAL FIX: Converting Power -> Log here.
+        This ensures the model trains on Log-Magnitude data (approx dB).
+        """
+        # 1. Get Power Spectrogram
+        mel_spec = self._mel_transform(self.waveform)
+        
+        # 2. Apply Log (Natural Log) with clamping to avoid log(0)
+        # This compresses the dynamic range from [0, 10000] to [-11.5, 9.2]
+        return torch.log(torch.clamp(mel_spec, min=1e-5))
+    
     def view_spectrogram(self, title=None, ylabel="Mel bins", ax=None, save_path=None):
         """Display and optionally save a Mel spectrogram."""
-        mel = self.mel_spectrogram # Use the property
-        mel_db = T.AmplitudeToDB("power", 80.0)(mel)
-        # .numpy() is still required here for plotting with matplotlib
-        mel_db = mel_db.squeeze(0).detach().cpu().numpy() 
+        # This is now already in Log Scale (Natural Log)
+        mel = self.mel_spectrogram 
+        
+        # Since we are already in Log, we don't use AmplitudeToDB (which takes Log again).
+        # We just normalize min-max for visualization.
+        mel_vis = mel.squeeze(0).detach().cpu().numpy() 
 
-        mel_db -= mel_db.min()
-        mel_db /= mel_db.max() + 1e-8
+        mel_vis -= mel_vis.min()
+        mel_vis /= mel_vis.max() + 1e-8
 
         plt.figure(figsize=(40, 10), dpi=300)
         plt.axis("off")
-        plt.imshow(mel_db, origin="lower", aspect="auto", cmap="magma")
+        plt.imshow(mel_vis, origin="lower", aspect="auto", cmap="magma")
 
         if save_path is not None:
             path = Path(save_path).with_suffix(".png")
@@ -113,7 +129,9 @@ class AudioFile:
         
         Returns: a list of segmented spectrograms [n_mels, L]
         """
+        # This will now fetch the LOG-Mel spectrogram
         mel = self.mel_spectrogram
+        
         if mel.dim() == 3 and mel.shape[0] == 1:
             mel_2d = mel.squeeze(0)
         elif mel.dim() == 2:
@@ -138,11 +156,6 @@ class AudioFile:
                 
         return segments
 
-    @property
-    def mel_spectrogram(self):
-        mel_spec = self._mel_transform(self.waveform)
-        return mel_spec
-    
     @staticmethod
     def _compute_local_style(mel_segment: torch.Tensor, delta_transform: T.ComputeDeltas) -> torch.Tensor:
         """

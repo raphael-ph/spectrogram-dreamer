@@ -6,9 +6,6 @@ set -e
 INPUT_DIR="data/1_validated-audio"
 OUTPUT_FILE="data/dataset_consolidated.h5"
 METADATA_FILE="data/data-file/validated.tsv"
-BATCH_SIZE=128
-EPOCHS=100
-LEARNING_RATE=1e-4
 
 # Spectrogram parameters
 N_FFT=512
@@ -35,11 +32,17 @@ python -m src.preprocessing.create_consolidated_dataset \
     --overlap $OVERLAP
 
 # Step 2: Train model
-python main.py \
-    --batch-size $BATCH_SIZE \
-    --epochs $EPOCHS \
-    --learning-rate $LEARNING_RATE \
-    --dataset "$OUTPUT_FILE"
+python main.py --use-consolidated \
+               --dataset-path data/dataset_consolidated.h5 \
+               --batch-size 128 \
+               --num-workers 8  \
+               --epochs 100 \
+               --lr 1e-4 \
+               --checkpoint-freq 10 \
+               --experiment-name "spectrogram-dreamer-v1" \
+               --h-state-size 200 \
+               --z-state-size 30 \
+               --action-size 128
 
 # Step 3: Test inference with best model
 if [ -d "checkpoints" ]; then

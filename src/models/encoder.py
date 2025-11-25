@@ -21,11 +21,12 @@ class Encoder(nn.Module):
                  in_channels: int = 1, 
                  cnn_depth: int = 32,
                  embedding_size: int = 256,
+                 input_shape: tuple = (64, 10),  # (n_mels, time_frames)
                  ):
         super().__init__()
 
-        # configuring CNN encoder
-        self.cnn_encoder = ConvEncoder(in_channels, cnn_depth)
+        # configuring CNN encoder with input shape
+        self.cnn_encoder = ConvEncoder(in_channels, cnn_depth, input_shape)
         cnn_output_dim = self.cnn_encoder.out_dim
 
         # implementing the multilayer perceptron
@@ -34,6 +35,29 @@ class Encoder(nn.Module):
                        hidden_dim=400, # following pydreamer
                        hidden_layers=2
                        )
+        
+        # Apply proper weight initialization to preserve variance
+        self._init_weights()
+        
+    def _init_weights(self):
+        """
+        Apply He (Kaiming) initialization to encoder layers.
+        
+        Ensures variance is properly preserved from input through the encoding process.
+        This prevents variance collapse and maintains spectral information quality.
+        """
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.kaiming_normal_(module.weight, mode='fan_in', nonlinearity='relu')
+                module.weight.data *= 0.5  # Controlled scaling
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+                    
+            elif isinstance(module, nn.Conv2d):
+                nn.init.kaiming_normal_(module.weight, mode='fan_in', nonlinearity='relu')
+                module.weight.data *= 0.7  # Controlled scaling for conv
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
       
     def forward(self, observation, deterministic_state):
         """
@@ -62,27 +86,40 @@ class ConvEncoder(nn.Module):
     from `Pydreamer`. Modified to handle spectrograms with small width (10 frames).
     """
     def __init__(self, in_channels: int = 1, # single audio channel
-                 cnn_depth: int = 32
+                 cnn_depth: int = 32,
+                 input_shape: tuple = (64, 10)  # (n_mels, time_frames)
                  ):
         super().__init__()
         # Use asymmetric kernels: larger for height (mel-bins), smaller for width (time)
-        # This handles spectrograms with shape (64, 10) better
+        # This handles spectrograms with various shapes better (64, 80 mels, etc.)
         # Using 3 layers instead of 4 to avoid width collapsing too fast
         d = cnn_depth
         self.model = nn.Sequential(
-            # Layer 1: (64, 10) -> (32, 5) with kernel (4,3), stride 2, padding (1,1)
+            # Layer 1: stride 2, padding (1,1)
             nn.Conv2d(in_channels, d * 2, kernel_size=(4, 3), stride=2, padding=(1, 1)),
             nn.ELU(),
-            # Layer 2: (32, 5) -> (16, 3) with kernel (4,3), stride 2, padding (1,1)
+            # Layer 2: stride 2, padding (1,1)
             nn.Conv2d(d * 2, d * 4, kernel_size=(4, 3), stride=2, padding=(1, 1)),
             nn.ELU(),
-            # Layer 3: (16, 3) -> (8, 2) with kernel (4,3), stride 2, padding (1,1)
+            # Layer 3: stride 2, padding (1,1)
             nn.Conv2d(d * 4, d * 8, kernel_size=(4, 3), stride=2, padding=(1, 1)),
             nn.ELU(),
             nn.Flatten()
         )
-        # Output dimension: d * 8 * 8 * 2 = d * 128
-        self.out_dim = d * 8 * 8 * 2
+        
+        # Calculate output dimension dynamically based on input shape
+        self.out_dim = self._calculate_conv_output_dim(in_channels, input_shape)
+        _logger.info(f"ConvEncoder output dimension: {self.out_dim} (input_shape={input_shape})")
+    
+    def _calculate_conv_output_dim(self, in_channels: int, input_shape: tuple) -> int:
+        """Calculate the output dimension of the convolutional layers dynamically"""
+        with torch.no_grad():
+            # Create dummy input
+            dummy_input = torch.zeros(1, in_channels, *input_shape)
+            # Forward pass through conv layers (all except Flatten)
+            dummy_output = self.model[:-1](dummy_input)  # Exclude Flatten
+            # Return flattened size
+            return int(torch.flatten(dummy_output, 1).shape[1])
 
     def forward(self, x):
         _logger.debug(f"x shape before flattening: {x.shape}") # expecting here (B, T, C, n_mels, L)

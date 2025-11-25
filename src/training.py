@@ -78,8 +78,10 @@ class DreamerTrainer:
         world_loss = model_output['losses']['total_loss']
         world_loss.backward()
         
-        # Gradient clipping
-        torch.nn.utils.clip_grad_norm_(self.world_optimizer.param_groups[0]['params'], max_norm=100.0)
+        # Gradient clipping for stability (especially important with He initialization)
+        # Clip world model gradients (encoder, RSSM, decoder, predictors)
+        world_model_params = list(self.world_optimizer.param_groups[0]['params'])
+        grad_norm = torch.nn.utils.clip_grad_norm_(world_model_params, max_norm=100.0)
         
         self.world_optimizer.step()
         
@@ -97,7 +99,12 @@ class DreamerTrainer:
             'kl_loss': model_output['losses']['kl_loss'].item(),
             'aux_loss': model_output['losses']['aux_loss'].item(),
             'actor_loss': actor_loss,
-            'critic_loss': critic_loss
+            'critic_loss': critic_loss,
+            # Variance metrics for monitoring decoder health
+            'obs_std': model_output['losses'].get('obs_std', 0.0),
+            'recon_std': model_output['losses'].get('recon_std', 0.0),
+            'variance_ratio': model_output['losses'].get('variance_ratio', 0.0),
+            'grad_norm': grad_norm.item()
         }
     
     def _train_actor_critic(self, h_state, z_state):
@@ -250,7 +257,20 @@ def train(model, dataset, num_epochs=100, batch_size=50, device='cuda',
             "imagination_horizon": trainer.imagination_horizon,
             "gamma": trainer.gamma,
             "lambda": trainer.lambda_,
+            "free_nats": 3.0,  # KL free nats for posterior collapse prevention
         })
+        
+        # Learning rate warmup scheduler
+        warmup_steps = 1000
+        def lr_lambda(step):
+            if step < warmup_steps:
+                return step / warmup_steps
+            return 1.0
+        
+        from torch.optim.lr_scheduler import LambdaLR
+        world_scheduler = LambdaLR(trainer.world_optimizer, lr_lambda)
+        actor_scheduler = LambdaLR(trainer.actor_optimizer, lr_lambda)
+        critic_scheduler = LambdaLR(trainer.critic_optimizer, lr_lambda)
         
         dataloader = create_dataloader(dataset, batch_size=batch_size, shuffle=True)
         
@@ -260,6 +280,8 @@ def train(model, dataset, num_epochs=100, batch_size=50, device='cuda',
         
         best_loss = float('inf')
         
+        global_step = 0
+        
         for epoch in range(num_epochs):
             epoch_losses = {
                 'world_loss': 0,
@@ -267,7 +289,11 @@ def train(model, dataset, num_epochs=100, batch_size=50, device='cuda',
                 'kl_loss': 0,
                 'aux_loss': 0,
                 'actor_loss': 0,
-                'critic_loss': 0
+                'critic_loss': 0,
+                'obs_std': 0,
+                'recon_std': 0,
+                'variance_ratio': 0,
+                'grad_norm': 0
             }
             
             num_batches = 0
@@ -280,22 +306,42 @@ def train(model, dataset, num_epochs=100, batch_size=50, device='cuda',
                 # Training step
                 losses = trainer.train_step(batch)
                 
+                # Step schedulers (warmup)
+                world_scheduler.step()
+                actor_scheduler.step()
+                critic_scheduler.step()
+                
                 # Accumulate losses
                 for k, v in losses.items():
                     epoch_losses[k] += v
                 
                 num_batches += 1
+                global_step += 1
+                
+                # Variance monitoring and alerting
+                recon_std = losses.get('recon_std', 0.0)
+                if recon_std < 0.2 and global_step > 100:
+                    _logger.warning(f"⚠️  WARNING: Decoder variance collapsed! "
+                                  f"recon_std={recon_std:.4f} at step {global_step}")
                 
                 if batch_idx % 10 == 0:
                     _logger.info(f"Epoch {epoch}, Batch {batch_idx}: "
                                f"World Loss: {losses['world_loss']:.4f}, "
                                f"Actor Loss: {losses['actor_loss']:.4f}, "
-                               f"Critic Loss: {losses['critic_loss']:.4f}")
+                               f"Critic Loss: {losses['critic_loss']:.4f}, "
+                               f"Recon Std: {recon_std:.4f}")
                     
                     # Log batch metrics to MLflow
                     step = epoch * len(dataloader) + batch_idx
                     mlflow.log_metrics({
                         f"batch/{k}": v for k, v in losses.items()
+                    }, step=step)
+                    
+                    # Log learning rates
+                    mlflow.log_metrics({
+                        "lr/world": trainer.world_optimizer.param_groups[0]['lr'],
+                        "lr/actor": trainer.actor_optimizer.param_groups[0]['lr'],
+                        "lr/critic": trainer.critic_optimizer.param_groups[0]['lr'],
                     }, step=step)
             
             # Average losses
@@ -309,6 +355,10 @@ def train(model, dataset, num_epochs=100, batch_size=50, device='cuda',
             _logger.info(f"  Aux Loss: {epoch_losses['aux_loss']:.4f}")
             _logger.info(f"  Actor Loss: {epoch_losses['actor_loss']:.4f}")
             _logger.info(f"  Critic Loss: {epoch_losses['critic_loss']:.4f}")
+            _logger.info(f"  Obs Std: {epoch_losses['obs_std']:.4f}")
+            _logger.info(f"  Recon Std: {epoch_losses['recon_std']:.4f}")
+            _logger.info(f"  Variance Ratio: {epoch_losses['variance_ratio']:.4f}")
+            _logger.info(f"  Grad Norm: {epoch_losses['grad_norm']:.4f}")
             
             # Log epoch metrics to MLflow
             mlflow.log_metrics({
@@ -395,9 +445,22 @@ def train_consolidated(model, train_dataloader, val_dataloader, num_epochs=100,
         model = model.to(device)
         trainer = DreamerTrainer(model, learning_rate=learning_rate)
         
+        # Learning rate warmup scheduler
+        warmup_steps = 1000
+        def lr_lambda(step):
+            if step < warmup_steps:
+                return step / warmup_steps
+            return 1.0
+        
+        from torch.optim.lr_scheduler import LambdaLR
+        world_scheduler = LambdaLR(trainer.world_optimizer, lr_lambda)
+        actor_scheduler = LambdaLR(trainer.actor_optimizer, lr_lambda)
+        critic_scheduler = LambdaLR(trainer.critic_optimizer, lr_lambda)
+        
         # Log trainer hyperparameters
         mlflow.log_params({
             "imagination_horizon": trainer.imagination_horizon,
+            "free_nats": 3.0,  # KL free nats
             "gamma": trainer.gamma,
             "lambda": trainer.lambda_,
         })
@@ -420,7 +483,11 @@ def train_consolidated(model, train_dataloader, val_dataloader, num_epochs=100,
                 'kl_loss': 0,
                 'aux_loss': 0,
                 'actor_loss': 0,
-                'critic_loss': 0
+                'critic_loss': 0,
+                'obs_std': 0,
+                'recon_std': 0,
+                'variance_ratio': 0,
+                'grad_norm': 0
             }
             
             num_batches = 0
@@ -452,17 +519,28 @@ def train_consolidated(model, train_dataloader, val_dataloader, num_epochs=100,
                 try:
                     losses = trainer.train_step(batch)
                     
+                    # Step schedulers (warmup)
+                    world_scheduler.step()
+                    actor_scheduler.step()
+                    critic_scheduler.step()
+                    
                     # Accumulate losses
                     for k, v in losses.items():
                         epoch_losses[k] += v
                     
                     num_batches += 1
                     
+                    # Variance monitoring and alerting
+                    recon_std = losses.get('recon_std', 0.0)
+                    if recon_std < 0.2 and batch_idx > 100:
+                        _logger.warning(f"⚠️  WARNING: Decoder variance collapsed! "
+                                      f"recon_std={recon_std:.4f}")
+                    
                     # Update progress bar with current losses
                     train_pbar.set_postfix({
                         'World': f"{losses['world_loss']:.4f}",
                         'Actor': f"{losses['actor_loss']:.4f}",
-                        'Critic': f"{losses['critic_loss']:.4f}"
+                        'Recon_std': f"{recon_std:.3f}"
                     })
                     
                     # Log progress
@@ -623,6 +701,9 @@ if __name__ == "__main__":
     # Example usage
     _logger.info("Initializing Dreamer model...")
     
+    # Default shape, will be updated if loading from HDF5
+    input_shape = (64, 10)
+    
     model = DreamerModel(
         h_state_size=200,
         z_state_size=30,
@@ -630,7 +711,8 @@ if __name__ == "__main__":
         embedding_size=256,
         aux_size=5,
         in_channels=1,
-        cnn_depth=32
+        cnn_depth=32,
+        input_shape=input_shape
     )
     
     _logger.info("Loading dataset...")

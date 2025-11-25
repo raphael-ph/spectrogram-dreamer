@@ -73,13 +73,21 @@ def main():
     
     # Auto-detect action size from dataset if using consolidated
     actual_action_size = args.action_size
+    input_shape = (64, 10)  # default: (n_mels, time_frames)
+    
     if args.use_consolidated and os.path.exists(args.dataset_path):
-        _logger.info("Detecting action size from HDF5 dataset...")
+        _logger.info("Detecting model parameters from HDF5 dataset...")
         import h5py
         with h5py.File(args.dataset_path, 'r') as f:
             if 'styles' in f:
                 actual_action_size = f['styles'].shape[-1]
                 _logger.info(f"Detected action size: {actual_action_size}")
+            
+            # Detect input shape from spectrograms
+            if 'spectrograms' in f:
+                spec_shape = f['spectrograms'].shape  # (N, H, W)
+                input_shape = (spec_shape[1], spec_shape[2])  # (n_mels, time_frames)
+                _logger.info(f"Detected input shape: {input_shape}")
     
     # Initialize model
     _logger.info("Initializing Dreamer model...")
@@ -90,7 +98,8 @@ def main():
         embedding_size=256,
         aux_size=5,  # pitch, energy, delta-energy, spectral centroid, onset strength
         in_channels=1,
-        cnn_depth=32
+        cnn_depth=32,
+        input_shape=input_shape
     )
     
     # Load dataset

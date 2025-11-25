@@ -1,0 +1,23 @@
+artifact_path: file:///home/henriquesouza/spectrogram-dreamer/mlruns/847030684811318288/models/m-770d00a44af3402497584d1baa827ccd/artifacts
+flavors:
+  python_function:
+    config:
+      device: null
+    data: data
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.pytorch
+    pickle_module_name: mlflow.pytorch.pickle_module
+    python_version: 3.12.3
+  pytorch:
+    code: null
+    model_data: data
+    pytorch_version: 2.2.2+cu121
+mlflow_version: 3.6.0
+model_id: m-770d00a44af3402497584d1baa827ccd
+model_size_bytes: 27043522
+model_uuid: m-770d00a44af3402497584d1baa827ccd
+prompts: null
+run_id: 2930eef1b5f940c4bbfd8a4ae5f1e96f
+utc_time_created: '2025-11-25 22:54:07.176255'

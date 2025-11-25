@@ -38,7 +38,8 @@ class DreamerModel(nn.Module):
                  embedding_size: int = 256,
                  aux_size: int = 5,
                  in_channels: int = 1,
-                 cnn_depth: int = 32):
+                 cnn_depth: int = 32,
+                 input_shape: tuple = (64, 10)):  # (n_mels, time_frames)
         super().__init__()
         
         self.h_state_size = h_state_size
@@ -50,7 +51,8 @@ class DreamerModel(nn.Module):
             h_state_size=h_state_size,
             in_channels=in_channels,
             cnn_depth=cnn_depth,
-            embedding_size=embedding_size
+            embedding_size=embedding_size,
+            input_shape=input_shape
         )
         
         self.rssm = RSSM(
@@ -64,7 +66,8 @@ class DreamerModel(nn.Module):
             h_state_size=h_state_size,
             z_state_size=z_state_size,
             out_channels=in_channels,
-            cnn_depth=cnn_depth
+            cnn_depth=cnn_depth,
+            output_shape=input_shape  # decoder outputs same shape as encoder input
         )
         
         # Predictors
@@ -212,10 +215,19 @@ class DreamerModel(nn.Module):
         # Reconstruction loss (MSE on Log-Mel spectrograms)
         recon_loss = F.mse_loss(reconstructed, observations)
         
-        # KL divergence loss
+        # KL divergence loss with free nats to prevent posterior collapse
+        # Free nats allows the latent space to maintain minimum information capacity
         prior_dist = torch.distributions.Normal(prior_means, prior_stds)
         posterior_dist = torch.distributions.Normal(posterior_means, posterior_stds)
-        kl_loss = torch.distributions.kl_divergence(posterior_dist, prior_dist).mean()
+        kl_divergence = torch.distributions.kl_divergence(posterior_dist, prior_dist)
+        
+        # Apply free nats: minimum KL per dimension to maintain representation capacity
+        # This prevents the posterior from collapsing to the prior too much
+        free_nats = 3.0  # Standard value for latent variable models
+        kl_loss = torch.maximum(
+            kl_divergence, 
+            torch.tensor(free_nats, device=observations.device)
+        ).mean()
         
         # Auxiliary loss (if targets provided)
         aux_loss = torch.tensor(0.0, device=observations.device)
@@ -225,11 +237,21 @@ class DreamerModel(nn.Module):
         # Total loss
         total_loss = recon_loss + kl_loss + aux_loss
         
+        # Compute variance metrics for monitoring (detached, no gradients)
+        with torch.no_grad():
+            obs_std = observations.std().item()
+            recon_std = reconstructed.std().item()
+            variance_ratio = recon_std / (obs_std + 1e-8)
+            
         return {
             'total_loss': total_loss,
             'recon_loss': recon_loss,
             'kl_loss': kl_loss,
-            'aux_loss': aux_loss
+            'aux_loss': aux_loss,
+            # Variance metrics for monitoring
+            'obs_std': obs_std,
+            'recon_std': recon_std,
+            'variance_ratio': variance_ratio
         }
     
     def imagine_trajectory(self, initial_h_state, initial_z_state, horizon):

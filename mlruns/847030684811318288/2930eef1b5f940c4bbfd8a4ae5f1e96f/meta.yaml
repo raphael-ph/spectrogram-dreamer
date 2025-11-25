@@ -1,0 +1,14 @@
+artifact_uri: file:///home/henriquesouza/spectrogram-dreamer/mlruns/847030684811318288/2930eef1b5f940c4bbfd8a4ae5f1e96f/artifacts
+end_time: 1764111249160
+entry_point_name: ''
+experiment_id: '847030684811318288'
+lifecycle_stage: active
+run_id: 2930eef1b5f940c4bbfd8a4ae5f1e96f
+run_name: dreamer_20251125_050735
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1764058055158
+status: 3
+tags: []
+user_id: henriquesouza

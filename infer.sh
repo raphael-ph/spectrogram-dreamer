@@ -1,10 +1,10 @@
 # On our way to San Francisco, we were listening to reggae music and smoking weed.
-python3 infer.py \
-  --model mlruns/789017296987570404/0d2a4e3ed58a4a3da945cc9cb861c675/artifacts/best_model.pt \
-  --input example_audio.mp3 \
-  --actions data/3_style-vectors/common_voice_en_100309 \
-  --mode recon \
-  --temp 0.50
+python infer.py \
+  --model checkpoints/dreamer_20251125_050735/best_model.pt \
+  --audio data/1_validated-audio/common_voice_en_10047.mp3 \
+  --styles data/3_style-vectors/common_voice_en_100039 \
+  --output result.wav \
+
 
 # The best view comes after the worst climb
 # python inference_with_style.py \

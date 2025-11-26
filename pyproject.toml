@@ -56,5 +56,6 @@ dependencies = [
     "traitlets==5.14.3",
     "typing-extensions==4.15.0",
     "tzdata==2025.2",
+    "vocos>=0.1.0",
     "wcwidth==0.2.14",
 ]

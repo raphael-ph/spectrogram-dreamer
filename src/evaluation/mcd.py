@@ -1,6 +1,6 @@
 # --- Mel Cepstral Distance (MCD) ---
 # 
-# The MCD is inspired on the classic Cdpstral Distance (CD) metric and
+# The MCD is inspired on the classic Cepstral Distance (CD) metric and
 # is essentially an implementation of CD on the Mel frequency scale.
 # This aims to better measure the quality of the generated audio based on the spectrogram.
 #
